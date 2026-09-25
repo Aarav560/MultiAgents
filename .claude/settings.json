@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "multiagents": {
+      "source": {
+        "source": "github",
+        "repo": "aarav560/multiagents"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "hivemind@multiagents": true
+  }
+}

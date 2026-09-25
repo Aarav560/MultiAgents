@@ -7,6 +7,9 @@ prompt of about 40 tokens and gets back one line. Its context grows by about 150
 however much code the workers write, so a 40-file project costs close to what a single agent would
 spend while finishing in a fraction of the wall-clock time.
 
+**New here? Read [GUIDE.md](GUIDE.md)**: install (Claude Code, auto-install for a repo, Claude Cowork / claude.ai
+upload packages in [`dist/`](dist)), a first run, flags, and troubleshooting.
+
 ## How it works
 
 ```
