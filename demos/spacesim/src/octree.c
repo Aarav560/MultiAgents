@@ -1,4 +1,4 @@
-/* octree.c - Barnes-Hut octree with pooled nodes and multi-body leaves at the depth cap. */
+/* octree.c - Barnes-Hut octree: pooled build nodes, flattened preorder walk, bucketed direct sums. */
 #include "octree.h"
 
 #include <math.h>
@@ -17,11 +17,33 @@ typedef struct {
     int leaf;      /* 1 = no children */
 } oct_node;
 
+/* Flattened walk node in depth-first preorder: the first child of node i is i + 1 and
+ * skip is the index just past its subtree, so the walk needs no stack. */
+typedef struct {
+    double cx, cy, cz, mass; /* center of mass, total mass */
+    double s2;               /* (edge length)^2 for the opening test */
+    double bx, by, bz, half; /* cube center and half edge (containment test) */
+    int skip;                /* next node after this subtree */
+    int first, nbodies;      /* body range in the packed arrays */
+    int pad;
+} oct_hot;
+
+typedef struct {
+    double x, y, z, m;
+} oct_pt;
+
 struct octree {
-    oct_node *nodes;
+    oct_node *nodes; /* build-time nodes (freed after flattening) */
     int count, capacity;
-    int *next; /* per-body linked list inside a leaf, -1 terminated */
+    int *next;       /* per-body linked list inside a leaf, -1 terminated */
+    oct_hot *hot;    /* count nodes in preorder */
+    oct_pt *pts;     /* alive bodies in tree order */
+    int *idx;        /* world index of each packed body */
+    int nb;          /* packed body count */
 };
+
+/* Subtrees with at most this many bodies are summed directly once opened. */
+#define OCT_BUCKET 8
 
 static int node_new(octree *t, vec3 center, double half) {
     if (t->count == t->capacity) {
@@ -107,6 +129,67 @@ static void finalize_com(octree *t) {
     }
 }
 
+/* Lays the build tree out in preorder with packed body ranges. Children always have a larger
+ * build index than their parent, so one reverse pass yields subtree sizes. */
+static int flatten(octree *t, const world *w) {
+    int n = t->count;
+    int *size = malloc((size_t)n * sizeof *size);
+    int *bcount = malloc((size_t)n * sizeof *bcount);
+    int *stack = malloc((size_t)n * sizeof *stack);
+    t->hot = malloc((size_t)n * sizeof *t->hot);
+    t->pts = malloc((size_t)t->nb * sizeof *t->pts);
+    t->idx = malloc((size_t)t->nb * sizeof *t->idx);
+    int ok = size && bcount && stack && t->hot && t->pts && t->idx;
+    if (ok) {
+        for (int i = n - 1; i >= 0; i--) {
+            const oct_node *b = &t->nodes[i];
+            size[i] = 1;
+            bcount[i] = b->nbodies;
+            for (int k = 0; k < 8; k++) {
+                if (b->child[k] < 0) continue;
+                size[i] += size[b->child[k]];
+                bcount[i] += bcount[b->child[k]];
+            }
+        }
+        int sp = 0, out = 0, boff = 0;
+        stack[sp++] = 0;
+        while (sp > 0) {
+            int bi = stack[--sp];
+            const oct_node *b = &t->nodes[bi];
+            oct_hot *h = &t->hot[out];
+            h->cx = b->com.x;
+            h->cy = b->com.y;
+            h->cz = b->com.z;
+            h->mass = b->mass;
+            h->s2 = 4.0 * b->half * b->half;
+            h->bx = b->center.x;
+            h->by = b->center.y;
+            h->bz = b->center.z;
+            h->half = b->half;
+            h->skip = out + size[bi];
+            h->first = boff;
+            h->nbodies = bcount[bi];
+            h->pad = 0;
+            out++;
+            for (int j = b->first; j >= 0; j = t->next[j]) {
+                const body *p = &w->bodies[j];
+                t->pts[boff] = (oct_pt){p->pos.x, p->pos.y, p->pos.z, p->mass};
+                t->idx[boff++] = j;
+            }
+            for (int k = 7; k >= 0; k--)
+                if (b->child[k] >= 0) stack[sp++] = b->child[k];
+        }
+    }
+    free(size);
+    free(bcount);
+    free(stack);
+    free(t->nodes);
+    t->nodes = NULL;
+    free(t->next);
+    t->next = NULL;
+    return ok ? 0 : -1;
+}
+
 octree *octree_build(const world *w) {
     if (!w || w->count <= 0) return NULL;
     vec3 lo = vec3_zero(), hi = vec3_zero();
@@ -127,6 +210,10 @@ octree *octree_build(const world *w) {
     if (!t) return NULL;
     t->count = 0;
     t->capacity = 2 * alive + 8;
+    t->hot = NULL;
+    t->pts = NULL;
+    t->idx = NULL;
+    t->nb = alive;
     t->nodes = malloc((size_t)t->capacity * sizeof *t->nodes);
     t->next = malloc((size_t)w->count * sizeof *t->next);
     if (!t->nodes || !t->next) {
@@ -147,6 +234,10 @@ octree *octree_build(const world *w) {
         }
     }
     finalize_com(t);
+    if (flatten(t, w) < 0) {
+        octree_free(t);
+        return NULL;
+    }
     return t;
 }
 
@@ -154,48 +245,61 @@ void octree_free(octree *t) {
     if (!t) return;
     free(t->nodes);
     free(t->next);
+    free(t->hot);
+    free(t->pts);
+    free(t->idx);
     free(t);
 }
 
 int octree_node_count(const octree *t) { return t ? t->count : 0; }
 
-/* Plummer-softened point-mass pull: G m d / (|d|^2 + eps^2)^{3/2}. */
-static vec3 pull(vec3 acc, vec3 d, double gm, double eps2) {
-    double r2 = vec3_len2(d) + eps2;
-    if (r2 <= 0.0) return acc;
-    double inv = 1.0 / sqrt(r2);
-    return vec3_madd(acc, d, gm * inv * inv * inv);
-}
-
-static int inside(const oct_node *n, vec3 p) {
-    return fabs(p.x - n->center.x) <= n->half && fabs(p.y - n->center.y) <= n->half &&
-           fabs(p.z - n->center.z) <= n->half;
-}
-
-static vec3 walk(const octree *t, const world *w, int ni, vec3 pos, int skip, double theta, vec3 acc) {
-    const oct_node *n = &t->nodes[ni];
-    double eps2 = w->softening * w->softening;
-    if (n->leaf) {
-        for (int bi = n->first; bi >= 0; bi = t->next[bi]) {
-            if (bi == skip) continue;
-            const body *b = &w->bodies[bi];
-            acc = pull(acc, vec3_sub(b->pos, pos), w->G * b->mass, eps2);
+/* Sum of m d / (|d|^2 + eps^2)^{3/2} over the tree (Plummer softening); the caller scales by G.
+ * Opening criterion size/dist < theta, tested as s^2 < theta^2 d^2; a cube containing pos is
+ * always opened. An opened subtree with few bodies is summed directly from the packed array. */
+static vec3 walk(const octree *t, double px, double py, double pz, int skip, double th2, double eps2) {
+    const oct_hot *hot = t->hot;
+    const oct_pt *pts = t->pts;
+    double ax = 0.0, ay = 0.0, az = 0.0;
+    int i = 0, end = t->count;
+    while (i < end) {
+        const oct_hot *h = &hot[i];
+        double dx = h->cx - px, dy = h->cy - py, dz = h->cz - pz;
+        double d2 = dx * dx + dy * dy + dz * dz;
+        if (h->nbodies > 1 && h->s2 < th2 * d2 &&
+            (fabs(px - h->bx) > h->half || fabs(py - h->by) > h->half || fabs(pz - h->bz) > h->half)) {
+            double r2 = d2 + eps2;
+            double inv = 1.0 / sqrt(r2);
+            double s = h->mass * inv * inv * inv;
+            ax += dx * s;
+            ay += dy * s;
+            az += dz * s;
+            i = h->skip;
+            continue;
         }
-        return acc;
+        if (h->nbodies > OCT_BUCKET && h->skip != i + 1) { /* big internal node: descend */
+            i++;
+            continue;
+        }
+        for (int j = h->first, e = h->first + h->nbodies; j < e; j++) {
+            if (t->idx[j] == skip) continue;
+            double qx = pts[j].x - px, qy = pts[j].y - py, qz = pts[j].z - pz;
+            double r2 = qx * qx + qy * qy + qz * qz + eps2;
+            if (r2 <= 0.0) continue;
+            double inv = 1.0 / sqrt(r2);
+            double s = pts[j].m * inv * inv * inv;
+            ax += qx * s;
+            ay += qy * s;
+            az += qz * s;
+        }
+        i = h->skip;
     }
-    vec3 d = vec3_sub(n->com, pos);
-    double dist = vec3_len(d);
-    /* Opening criterion size/dist < theta; a node containing pos is always opened. */
-    if (dist > 0.0 && 2.0 * n->half < theta * dist && !inside(n, pos))
-        return pull(acc, d, w->G * n->mass, eps2);
-    for (int k = 0; k < 8; k++)
-        if (n->child[k] >= 0) acc = walk(t, w, n->child[k], pos, skip, theta, acc);
-    return acc;
+    return vec3_make(ax, ay, az);
 }
 
 vec3 octree_accel_at(const octree *t, const world *w, vec3 pos, int skip_index, double theta) {
     if (!t || !w || t->count == 0) return vec3_zero();
-    return walk(t, w, 0, pos, skip_index, theta, vec3_zero());
+    vec3 a = walk(t, pos.x, pos.y, pos.z, skip_index, theta * theta, w->softening * w->softening);
+    return vec3_scale(a, w->G);
 }
 
 /* Direct-sum fallback used only if the tree cannot be allocated. */
@@ -227,9 +331,12 @@ void gravity_barnes_hut(world *w, void *ctx) {
         direct_fallback(w);
         return;
     }
-    for (int i = 0; i < w->count; i++) {
-        body *b = &w->bodies[i];
-        if (b->alive) b->acc = octree_accel_at(t, w, b->pos, i, theta);
+    double th2 = theta * theta, eps2 = w->softening * w->softening;
+    /* Tree order keeps consecutive walks on nearly the same nodes (cache locality). */
+    for (int j = 0; j < t->nb; j++) {
+        const oct_pt *p = &t->pts[j];
+        int bi = t->idx[j];
+        w->bodies[bi].acc = vec3_scale(walk(t, p->x, p->y, p->z, bi, th2, eps2), w->G);
     }
     octree_free(t);
 }
