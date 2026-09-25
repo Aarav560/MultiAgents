@@ -313,3 +313,6 @@ void pf_sleep(double seconds) {
 }
 
 #endif /* !STARSIM_HEADLESS && !_WIN32 && !__APPLE__ */
+
+/* Keeps ISO C happy when the #if above excludes this whole file (empty translation unit). */
+typedef int platform_x11_unused;

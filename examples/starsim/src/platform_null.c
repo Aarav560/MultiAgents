@@ -80,3 +80,6 @@ void pf_sleep(double seconds) {
 #endif
 
 #endif
+
+/* Keeps ISO C happy when the #if above excludes this whole file (empty translation unit). */
+typedef int platform_null_unused;

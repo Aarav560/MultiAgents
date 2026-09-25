@@ -332,3 +332,6 @@ void pf_sleep(double seconds)
 #else
 typedef int starsim_platform_win32_unused;
 #endif
+
+/* Keeps ISO C happy when the #if above excludes this whole file (empty translation unit). */
+typedef int platform_win32_unused;
