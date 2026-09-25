@@ -168,3 +168,16 @@ accept: sh tests/run_scenarios.sh
 Write tests/run_scenarios.sh (POSIX sh, `set -eu`): it builds with make, runs every scenarios/*.ini with --steps 300 --quiet, runs every integrator on figure8 and both gravity solvers on cluster, checks the exit codes,
 and checks that the energy drift reported in the summary is below a per-integrator threshold (euler is exempt). It also writes one CSV and 3 PPM frames into build/sweep/ and checks they exist and are non-empty.
 Then run `make test` and the script. For every failure in someone else's file, `ask` with the exact file, line and fix. Report the pass/fail counts in your done note.
+
+## OPT [builder deep] Barnes-Hut performance
+writes: src/octree.c
+reads: include/octree.h, tests/test_octree.c, bench/bench_gravity.c
+deps: OCT, BENCH
+accept: mkdir -p build && cc -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude tests/test_octree.c src/octree.c src/world.c -lm -o build/test_octree && ./build/test_octree
+accept: mkdir -p build && cc -std=c11 -Wall -Wextra -Wpedantic -Werror -O2 -Iinclude bench/bench_gravity.c src/gravity.c src/octree.c src/world.c -lm -o build/bench_gravity && ./build/bench_gravity 20000
+src/octree.c is correct but slow: `./build/bench_gravity 20000` shows BH at theta 0.5 only 1.2x faster than direct and theta 0.3 slower than direct. Make it fast without changing the public API or the test results.
+Target: at n = 20000, theta 0.5 is at least 4x faster than direct (ideally 8x+) and theta 0.8 is 10x+, with RMS error no worse than now.
+Known inefficiencies: one body per leaf (use buckets of up to 8-16 bodies per leaf and split only when a leaf overflows); recursive walk passing vec3 by value (use an explicit stack);
+sqrt on every node visit (compare squared quantities, s^2 < theta^2 d^2, and take sqrt only when you interact); eps2 recomputed per call; the node struct layout (keep hot fields together).
+Optionally sort bodies by Morton order before insertion for cache locality. Keep pooled allocation, depth cap and coincident-body handling.
+Put the before/after numbers in your done note.
