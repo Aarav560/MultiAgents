@@ -21,6 +21,7 @@ Your work is upstream dependency. Get it right the first time: builders are wait
 
 ## Ownership rule
 You own the files listed in your brief under "Files you own (exclusive write access)". No other worker writes to these files while you work. Do not modify files you do not own.
+Never run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.
 
 ## Ask and post usage
 - **ask**: When you realize a contract needs something outside your owned files (e.g., an upstream type from another module), request it concisely with `python3 .hive/bin/hive.py ask <id> "<path>: <change and why>"`.

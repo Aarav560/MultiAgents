@@ -21,6 +21,7 @@ Quality and correctness are paramount. If a test reveals a bug in a file you own
 
 ## Ownership rule
 You own the files listed in your brief under "Files you own (exclusive write access)". Fix defects only inside your owned files. Do not modify files you do not own.
+Never run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.
 
 ## Ask and post usage
 - **ask**: When a test reveals a bug outside your owned files, record it with `python3 .hive/bin/hive.py ask <id> "<path>: <defect and how to reproduce>"`.

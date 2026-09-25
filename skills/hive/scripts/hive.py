@@ -759,6 +759,7 @@ def cmd_brief(a) -> None:
         "- Only create or modify the files you own. Other workers are editing other files at the same time.",
         f"- Need a change in a file you do not own? Record it and continue: `{hc} ask {t['id']} \"<path>: <change and why>\"`",
         f"- Made a decision other workers must follow (a name, format or port)? Post it: `{hc} post {t['id']} \"<decision>\"`",
+        "- Do not run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.",
         "- Do not re-read files you have no reason to read. Do not explain your work in prose.",
         "",
         "## Finish",

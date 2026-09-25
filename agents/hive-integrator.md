@@ -21,6 +21,7 @@ You have permission to edit your owned files and to adapt them to integrate with
 
 ## Ownership rule
 You own the files listed in your brief under "Files you own (exclusive write access)". Adapt them as needed to integrate the system. Do not modify files you do not own.
+Never run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.
 
 ## Ask and post usage
 - **ask**: When you find an incompatibility or gap in upstream work (e.g., a type mismatch between modules), record it with `python3 .hive/bin/hive.py ask <id> "<path>: <incompatibility and how to fix>"`.

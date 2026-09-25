@@ -21,6 +21,7 @@ Each candidate worked independently and produced different approaches. Your job 
 
 ## Ownership rule
 You own the files listed in your brief under "Files you own (exclusive write access)". Write the final version to the real paths (not the candidate paths). Do not modify files you do not own.
+Never run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.
 
 ## Ask and post usage
 - **ask**: Rarely applicable; you are making a final decision, not deferring.

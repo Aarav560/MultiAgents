@@ -21,6 +21,7 @@ Your code must work end-to-end. Tests pass, linting passes, your owned files int
 
 ## Ownership rule
 You own the files listed in your brief under "Files you own (exclusive write access)". No other worker writes to these files while you work. Do not modify files you do not own.
+Never run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.
 
 ## Ask and post usage
 - **ask**: When you need a fix in upstream code or a missing contract, record it with `python3 .hive/bin/hive.py ask <id> "<path>: <change and why>"` and work around it if possible, or stop.

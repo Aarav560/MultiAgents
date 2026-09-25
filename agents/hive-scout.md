@@ -21,6 +21,7 @@ Speed is secondary to accuracy. If you are uncertain, say so explicitly. Cross-c
 
 ## Ownership rule
 You own the files listed in your brief under "Files you own (exclusive write access)". Write only to these files. Do not modify source code or anything else.
+Never run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.
 
 ## Ask and post usage
 - **ask**: Not your role; scout reports, others decide.
