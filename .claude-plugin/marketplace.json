@@ -1,5 +1,6 @@
 {
   "name": "multiagents",
+  "description": "hivemind: parallel multi-agent orchestration for Claude Code",
   "owner": {
     "name": "aarav560"
   },

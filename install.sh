@@ -132,4 +132,4 @@ shopt -u nullglob
 echo ""
 echo "Install complete."
 echo "Next step:"
-echo "  In Claude Code: /hive <goal>  (for standalone installs set \`agents: hive\` in plan.md to use the hive-* subagents)"
+echo "  In Claude Code: /hive <goal>  (restart the session first; set \`agents: hive\` in plan.md to use the hive-* subagents)"

@@ -22,7 +22,7 @@ python3 .hive/bin/hive.py estimate     # optional: rough token/wall-clock cost
 
 Then either:
 
-- Say **`/hive`** in this Claude Code session (with the demo/ directory as your working
+- Say **`/hivemind:hive`** (plugin install) or **`/hive`** (standalone install) in this Claude Code session (with the demo/ directory as your working
   directory) and let the orchestrator run the dispatch loop, or
 - Drive the loop yourself:
 

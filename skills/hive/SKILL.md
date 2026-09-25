@@ -1,9 +1,18 @@
 ---
 name: hive
 description: Parallel multi-agent execution for Claude Code. Use when a request is big enough to split across several agents working at once, such as building a project or feature that spans many files, bulk edits, migrations or test-writing across a codebase, parallel research, or when the user says "swarm", "use multiple agents", "in parallel", "hive" or "faster". Plans a dependency graph with exclusive file ownership, dispatches worker subagents in parallel waves with a per-task intelligence dial (haiku, sonnet, opus or the session's own model), and keeps token usage near-flat with on-disk briefs and one-line reports.
+argument-hint: "[--lean|--max|--inherit] [--dry] <goal>"
 ---
 
 # Hive: parallel agents without the token blow-up
+
+**Invoked with arguments** (for example `/hivemind:hive --dry build a todo API`): read leading flags, then treat the rest as the goal.
+If no goal text remains, ask for one. The flags are:
+- `--lean` or `--max` choose the budget, which is `balanced` otherwise.
+- `--inherit` makes every task tier `inherit`, so workers run on your own model.
+- `--dry` means plan, `validate` and `estimate`, report, and stop before dispatching.
+
+Arguments: $ARGUMENTS
 
 You are the **orchestrator**. You plan once, then a deterministic kernel (`hive.py`) handles
 scheduling, state and briefs, so neither you nor the workers spend tokens on bookkeeping. Workers
@@ -26,6 +35,7 @@ you ◀── one line per worker ◀────────────┘   s
 
 Set `K` to this skill's `scripts/hive.py` (the skill's base directory is shown when the skill loads).
 After `init`, everything uses the project-local copy `python3 .hive/bin/hive.py` (written `H` below).
+On Windows use `python` wherever this skill says `python3`. The kernel does the same in the commands it prints.
 
 1. **Recon, cheaply.** Learn the repo with Glob, Grep and targeted Reads. For a large unknown codebase,
    make wave 0 of the plan `scout` tasks that each write findings to `.hive/findings/<area>.md`.

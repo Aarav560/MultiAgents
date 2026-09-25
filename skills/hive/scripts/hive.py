@@ -115,8 +115,12 @@ def die(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
+# Windows installs usually provide `python`, not `python3`.
+PY = "python" if os.name == "nt" else "python3"
+
+
 def hive_cmd() -> str:
-    return f"python3 {HIVE.as_posix()}/bin/hive.py"
+    return f"{PY} {HIVE.as_posix()}/bin/hive.py"
 
 
 def at_root(p: str) -> Path:

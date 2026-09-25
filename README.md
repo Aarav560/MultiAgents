@@ -35,20 +35,31 @@ for a file they don't own) and `post` (a team board shown in later briefs).
 
 ### Plugin marketplace (recommended)
 
-```
-/plugin marketplace add aarav560/multiagents
-/plugin install hivemind@multiagents
+In your terminal:
+
+```bash
+claude plugin marketplace add aarav560/multiagents
+claude plugin install hivemind@multiagents
 ```
 
+Or inside a Claude Code session, run `/plugin marketplace add aarav560/multiagents`, then
+`/plugin install hivemind@multiagents`. Restart the session (or run `/reload-plugins`) and the
+commands appear as **`/hivemind:hive`**, `/hivemind:hive-swarm` and so on. Plugin commands always carry the
+`hivemind:` prefix.
+
+To install from a branch other than the default one, add `#<branch>` to the source:
+`claude plugin marketplace add "aarav560/multiagents#<branch>"`.
+
 This installs the `hive` skill, the seven `hive-*` subagents, the slash commands and a
-SessionStart hook that prints a one-line progress summary when a run is in progress.
+SessionStart hook that prints a one-line progress summary while a run is in progress.
+Check it with `claude plugin details hivemind`.
 
 ### Standalone installer
 
 ```bash
 git clone https://github.com/aarav560/multiagents.git
 cd multiagents
-./install.sh              # copies skills/hive, agents/hive-*.md and commands/ into ~/.claude
+./install.sh              # copies skills/hive, agents/hive-*.md and commands/ into ~/.claude (commands: /hive, /hive-swarm, ...)
 ./install.sh --uninstall  # removes exactly what it copied
 ```
 
@@ -65,8 +76,11 @@ must run from a clone, because it resolves paths relative to itself.
 ## Quick start
 
 ```
-/hive build a REST API for todos with auth, tests and docs
+/hivemind:hive build a REST API for todos with auth, tests and docs
 ```
+
+(With the standalone installer the same command is `/hive ...`. You can also just ask in plain words,
+for example "use hive to build ..." or "swarm this", and Claude loads the skill itself.)
 
 What happens:
 
@@ -85,8 +99,8 @@ What happens:
 7. **Verify and report.** `hive.py verify --run` checks owned files and runs every `accept:`
    command. You get a few lines: what was built, what passed, what is open.
 
-Flags: `/hive --lean`, `/hive --max`, `/hive --inherit`, and `/hive --dry` (plan, validate and
-estimate, then stop before dispatching).
+Flags: `--lean`, `--max`, `--inherit` and `--dry` (plan, validate and estimate, then stop before
+dispatching), as in `/hivemind:hive --dry build ...`.
 
 ## Intelligence dial
 
@@ -120,15 +134,15 @@ plus a judge that keeps the original id and writes the real paths. Examples of e
 
 ## Commands
 
-Slash commands (from `commands/`):
+Slash commands. Plugin installs prefix them with `hivemind:`, as in `/hivemind:hive-status`.
 
-| command | what it does |
-|---------|--------------|
-| `/hive [--lean\|--max\|--inherit] [--dry] <goal>` | full protocol: plan, validate, dispatch, verify, report |
-| `/hive-swarm <task>` | flat swarm, one task per independent file or module |
-| `/hive-unite <goal>` | contracts, parallel builders, integrator, verifier |
-| `/hive-status` | three-line summary of the active run |
-| `/hive-resume` | resume after a restart (`dispatch --requeue`, then continue) |
+| plugin install | standalone install | what it does |
+|----------------|--------------------|--------------|
+| `/hivemind:hive [--lean\|--max\|--inherit] [--dry] <goal>` | `/hive ...` | full protocol: plan, validate, dispatch, verify, report |
+| `/hivemind:hive-swarm <task>` | `/hive-swarm` | flat swarm, one task per independent file or module |
+| `/hivemind:hive-unite <goal>` | `/hive-unite` | contracts, parallel builders, integrator, verifier |
+| `/hivemind:hive-status` | `/hive-status` | three-line summary of the active run |
+| `/hivemind:hive-resume` | `/hive-resume` | resume after a restart (`dispatch --requeue`, then continue) |
 
 Kernel commands (`python3 .hive/bin/hive.py <command>`):
 
@@ -266,16 +280,18 @@ If the skill loads inside a subagent, it works through the plan sequentially wit
 **What if a worker dies?**
 Its task stays `running`. Once no agents are in flight, `dispatch --requeue` returns it to pending,
 and `dispatch --stale MIN` requeues only tasks running longer than MIN minutes. After a restart,
-`/hive-resume` does this for you. Failed tasks can be fixed and rerun with `reset <id>` or
+`/hivemind:hive-resume` does this for you. Failed tasks can be fixed and rerun with `reset <id>` or
 `dispatch --retry-failed`.
 
 **How do I give workers my own intellect?**
-Use tier `inherit`, which omits the model so each worker runs on the session's model. `/hive
+Use tier `inherit`, which omits the model so each worker runs on the session's model. `/hivemind:hive
 --inherit <goal>` applies it to every task. `budget: max` raises every other tier as well.
 
 **Windows?**
-The kernel is stdlib Python and state is plain files, so it runs wherever `python3` does. The hook
-calls `python3`, so it must be on your PATH. `install.sh` needs bash (Git Bash or WSL). Without it,
+The kernel is stdlib Python and state is plain files, so it runs wherever Python 3.8+ does. The
+kernel writes worker commands using the interpreter name it was started with (`python` on a typical
+Windows install), so start it the way your system spells Python. The session hook calls `python3`
+and fails silently without it. `install.sh` needs bash (Git Bash or WSL). Without it,
 use the plugin marketplace, or copy `skills/hive`, `agents/hive-*.md` and `commands/` into
 `%USERPROFILE%\.claude` by hand.
 
