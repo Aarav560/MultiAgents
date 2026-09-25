@@ -1,9 +1,8 @@
 # Physics of `orbit`
 
-This document explains the physics and numerical methods behind `orbit`: gravity and
-softening, the two gravity solvers, the five integrators, Keplerian mechanics, the Hohmann
-transfer, collisions, the diagnostics, and N-body units. All math is plain arithmetic, no
-LaTeX.
+This document explains the physics behind `orbit`: gravity and softening, the two gravity
+solvers, the five integrators, Keplerian mechanics, the Hohmann transfer, collisions, the
+diagnostics, and N-body units. All math is plain arithmetic, no LaTeX.
 
 ## Newtonian gravity and softening
 
@@ -51,11 +50,11 @@ O(n log n) on average, since each insertion or query touches O(log n) levels -- 
 O(n^2) once `n` reaches the thousands.
 
 `theta` trades accuracy for speed: `theta = 0` opens every node down to leaves and reproduces
-`gravity_direct` to within 1e-9 relative error (the correctness check in the octree test); small
-theta (0.2-0.3) stays close to exact at less speedup; large theta (0.7-1.0) accepts more
-distant approximation, showing up as energy and angular-momentum drift over long runs. 0.5 is a
-typical default. Because bodies can coincide, tree depth is capped at 64, with the deepest leaf
-holding several bodies rather than subdividing forever.
+`gravity_direct` to within 1e-9 relative error; small theta (0.2-0.3) stays close to exact at
+less speedup; large theta (0.7-1.0) accepts more distant approximation, showing up as energy and
+angular-momentum drift over long runs. 0.5 is a typical default. Because bodies can coincide,
+tree depth is capped at 64, with the deepest leaf holding several bodies rather than subdividing
+forever.
 
 ## The integrators
 
