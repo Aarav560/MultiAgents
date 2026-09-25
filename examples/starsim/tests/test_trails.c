@@ -24,14 +24,14 @@ static void test_trails_invalid_args(void) {
     CHECK(t == NULL);
 }
 
-TEST(trails_get_unknown_id) {
+static void test_trails_get_unknown_id(void) {
     trails *t = trails_create(5, 10);
     vec2 out[10];
     CHECK(trails_get(t, 99, out, 10) == 0);
     trails_free(t);
 }
 
-TEST(trails_clear) {
+static void test_trails_clear(void) {
     trails *t = trails_create(5, 10);
     world w;
     setup_world(&w);
@@ -56,7 +56,7 @@ TEST(trails_clear) {
     trails_free(t);
 }
 
-TEST(trails_skip_dust) {
+static void test_trails_skip_dust(void) {
     trails *t = trails_create(5, 10);
     world w;
     setup_world(&w);
@@ -87,7 +87,7 @@ TEST(trails_skip_dust) {
     trails_free(t);
 }
 
-TEST(trails_ring_buffer) {
+static void test_trails_ring_buffer(void) {
     trails *t = trails_create(5, 3);
     world w;
     setup_world(&w);
@@ -119,7 +119,7 @@ TEST(trails_ring_buffer) {
     trails_free(t);
 }
 
-TEST(trails_dead_body_releases_slot) {
+static void test_trails_dead_body_releases_slot(void) {
     trails *t = trails_create(5, 10);
     world w;
     setup_world(&w);
@@ -153,7 +153,7 @@ TEST(trails_dead_body_releases_slot) {
     trails_free(t);
 }
 
-TEST(trails_slot_reuse) {
+static void test_trails_slot_reuse(void) {
     trails *t = trails_create(2, 10);
     world w;
     setup_world(&w);
@@ -191,7 +191,7 @@ TEST(trails_slot_reuse) {
     trails_free(t);
 }
 
-TEST(trails_max_bodies_exceeded) {
+static void test_trails_max_bodies_exceeded(void) {
     trails *t = trails_create(2, 10);
     world w;
     setup_world(&w);
@@ -219,7 +219,7 @@ TEST(trails_max_bodies_exceeded) {
     trails_free(t);
 }
 
-TEST(trails_multiple_records) {
+static void test_trails_multiple_records(void) {
     trails *t = trails_create(5, 5);
     world w;
     setup_world(&w);
@@ -250,7 +250,7 @@ TEST(trails_multiple_records) {
     trails_free(t);
 }
 
-TEST(trails_partial_read) {
+static void test_trails_partial_read(void) {
     trails *t = trails_create(5, 10);
     world w;
     setup_world(&w);
@@ -279,4 +279,17 @@ TEST(trails_partial_read) {
     trails_free(t);
 }
 
-TEST_SUMMARY();
+int main(void) {
+    RUN(test_trails_create_and_free);
+    RUN(test_trails_invalid_args);
+    RUN(test_trails_get_unknown_id);
+    RUN(test_trails_clear);
+    RUN(test_trails_skip_dust);
+    RUN(test_trails_ring_buffer);
+    RUN(test_trails_dead_body_releases_slot);
+    RUN(test_trails_slot_reuse);
+    RUN(test_trails_max_bodies_exceeded);
+    RUN(test_trails_multiple_records);
+    RUN(test_trails_partial_read);
+    return TEST_SUMMARY();
+}
