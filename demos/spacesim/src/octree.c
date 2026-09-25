@@ -44,6 +44,8 @@ struct octree {
 
 /* Subtrees with at most this many bodies are summed directly once opened. */
 #define OCT_BUCKET 8
+/* gravity_barnes_hut shares one interaction list among subtrees of at most this many bodies. */
+#define OCT_GROUP 16
 
 static int node_new(octree *t, vec3 center, double half) {
     if (t->count == t->capacity) {
@@ -322,6 +324,109 @@ static void direct_fallback(world *w) {
     }
 }
 
+/* Growable interaction list of point masses (accepted node monopoles and opened bodies). */
+typedef struct {
+    oct_pt *p;
+    int n, cap;
+} ilist;
+
+static int ilist_push(ilist *l, oct_pt q) {
+    if (l->n == l->cap) {
+        int cap = l->cap ? 2 * l->cap : 1024;
+        oct_pt *p = realloc(l->p, (size_t)cap * sizeof *p);
+        if (!p) return -1;
+        l->p = p;
+        l->cap = cap;
+    }
+    l->p[l->n++] = q;
+    return 0;
+}
+
+/* Builds the interaction list shared by the bodies [first, first+nb) whose bounding box is
+ * lo..hi. A node is accepted only if s^2 < theta^2 dmin^2, dmin being the distance from its
+ * center of mass to the box, so every member satisfies its own criterion; a cube that
+ * overlaps the box is always opened. */
+static int group_list(const octree *t, const double lo[3], const double hi[3], double th2, ilist *l) {
+    const oct_hot *hot = t->hot;
+    int i = 0, end = t->count;
+    l->n = 0;
+    while (i < end) {
+        const oct_hot *h = &hot[i];
+        double c[3] = {h->cx, h->cy, h->cz}, b[3] = {h->bx, h->by, h->bz};
+        double d2 = 0.0;
+        int overlap = 1;
+        for (int k = 0; k < 3; k++) {
+            double g = c[k] < lo[k] ? lo[k] - c[k] : (c[k] > hi[k] ? c[k] - hi[k] : 0.0);
+            d2 += g * g;
+            overlap &= b[k] - h->half <= hi[k] && b[k] + h->half >= lo[k];
+        }
+        if (h->nbodies > 1 && !overlap && h->s2 < th2 * d2) {
+            if (ilist_push(l, (oct_pt){h->cx, h->cy, h->cz, h->mass}) < 0) return -1;
+            i = h->skip;
+            continue;
+        }
+        if (h->nbodies > OCT_BUCKET && h->skip != i + 1) {
+            i++;
+            continue;
+        }
+        for (int j = h->first, e = h->first + h->nbodies; j < e; j++)
+            if (ilist_push(l, t->pts[j]) < 0) return -1;
+        i = h->skip;
+    }
+    return 0;
+}
+
+/* Softened sum over the list; the body itself (and any coincident one) has d = 0 and adds 0. */
+static vec3 list_accel(const ilist *l, const oct_pt *p, double eps2) {
+    double ax = 0.0, ay = 0.0, az = 0.0;
+    for (int j = 0; j < l->n; j++) {
+        const oct_pt *q = &l->p[j];
+        double dx = q->x - p->x, dy = q->y - p->y, dz = q->z - p->z;
+        double r2 = dx * dx + dy * dy + dz * dz + eps2;
+        if (r2 <= 0.0) continue;
+        double inv = 1.0 / sqrt(r2);
+        double s = q->m * inv * inv * inv;
+        ax += dx * s;
+        ay += dy * s;
+        az += dz * s;
+    }
+    return vec3_make(ax, ay, az);
+}
+
+/* Walks the tree once per group (a node of at most OCT_GROUP bodies, or a depth-capped leaf). */
+static int group_walk(const octree *t, world *w, double th2, double eps2) {
+    ilist l = {NULL, 0, 0};
+    int i = 0;
+    while (i < t->count) {
+        const oct_hot *h = &t->hot[i];
+        if (h->nbodies > OCT_GROUP && h->skip != i + 1) {
+            i++;
+            continue;
+        }
+        double lo[3], hi[3];
+        const oct_pt *p = &t->pts[h->first];
+        lo[0] = hi[0] = p->x;
+        lo[1] = hi[1] = p->y;
+        lo[2] = hi[2] = p->z;
+        for (int j = 1; j < h->nbodies; j++) {
+            double q[3] = {p[j].x, p[j].y, p[j].z};
+            for (int k = 0; k < 3; k++) {
+                lo[k] = fmin(lo[k], q[k]);
+                hi[k] = fmax(hi[k], q[k]);
+            }
+        }
+        if (group_list(t, lo, hi, th2, &l) < 0) {
+            free(l.p);
+            return -1;
+        }
+        for (int j = h->first, e = h->first + h->nbodies; j < e; j++)
+            w->bodies[t->idx[j]].acc = vec3_scale(list_accel(&l, &t->pts[j], eps2), w->G);
+        i = h->skip;
+    }
+    free(l.p);
+    return 0;
+}
+
 void gravity_barnes_hut(world *w, void *ctx) {
     if (!w) return;
     double theta = ctx ? ((const bh_params *)ctx)->theta : 0.5;
@@ -332,11 +437,13 @@ void gravity_barnes_hut(world *w, void *ctx) {
         return;
     }
     double th2 = theta * theta, eps2 = w->softening * w->softening;
-    /* Tree order keeps consecutive walks on nearly the same nodes (cache locality). */
-    for (int j = 0; j < t->nb; j++) {
-        const oct_pt *p = &t->pts[j];
-        int bi = t->idx[j];
-        w->bodies[bi].acc = vec3_scale(walk(t, p->x, p->y, p->z, bi, th2, eps2), w->G);
+    if (group_walk(t, w, th2, eps2) < 0) {
+        /* List allocation failed: per-body walks need no extra memory. */
+        for (int j = 0; j < t->nb; j++) {
+            const oct_pt *p = &t->pts[j];
+            int bi = t->idx[j];
+            w->bodies[bi].acc = vec3_scale(walk(t, p->x, p->y, p->z, bi, th2, eps2), w->G);
+        }
     }
     octree_free(t);
 }
