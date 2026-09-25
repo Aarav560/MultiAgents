@@ -45,7 +45,7 @@ struct octree {
 /* Subtrees with at most this many bodies are summed directly once opened. */
 #define OCT_BUCKET 8
 /* gravity_barnes_hut shares one interaction list among subtrees of at most this many bodies. */
-#define OCT_GROUP 16
+#define OCT_GROUP 64
 
 static int node_new(octree *t, vec3 center, double half) {
     if (t->count == t->capacity) {
@@ -131,6 +131,26 @@ static void finalize_com(octree *t) {
     }
 }
 
+/* Replaces each node's size by the largest edge of the bounding box of its bodies (never
+ * larger than the cube), a tighter "size" for the opening test. Bodies of a node are the
+ * contiguous range [first, first + nbodies) of the packed array. */
+static void body_extent(octree *t) {
+    for (int i = 0; i < t->count; i++) {
+        oct_hot *h = &t->hot[i];
+        const oct_pt *p = &t->pts[h->first];
+        double lo[3] = {p->x, p->y, p->z}, hi[3] = {p->x, p->y, p->z};
+        for (int j = 1; j < h->nbodies; j++) {
+            double q[3] = {p[j].x, p[j].y, p[j].z};
+            for (int k = 0; k < 3; k++) {
+                lo[k] = fmin(lo[k], q[k]);
+                hi[k] = fmax(hi[k], q[k]);
+            }
+        }
+        double e = fmax(hi[0] - lo[0], fmax(hi[1] - lo[1], hi[2] - lo[2]));
+        h->s2 = e * e;
+    }
+}
+
 /* Lays the build tree out in preorder with packed body ranges. Children always have a larger
  * build index than their parent, so one reverse pass yields subtree sizes. */
 static int flatten(octree *t, const world *w) {
@@ -181,6 +201,7 @@ static int flatten(octree *t, const world *w) {
             for (int k = 7; k >= 0; k--)
                 if (b->child[k] >= 0) stack[sp++] = b->child[k];
         }
+        body_extent(t);
     }
     free(size);
     free(bcount);
@@ -376,19 +397,43 @@ static int group_list(const octree *t, const double lo[3], const double hi[3], d
     return 0;
 }
 
-/* Softened sum over the list; the body itself (and any coincident one) has d = 0 and adds 0. */
+/* Softened sum over the list; the body itself (and any coincident one) has d = 0 and adds 0.
+ * Entries go in pairs sharing one division: with x = r_a^3, y = r_b^3 and q = 1/(x y),
+ * 1/r_a^3 = y q and 1/r_b^3 = x q. A pair whose product leaves the safe range falls back. */
 static vec3 list_accel(const ilist *l, const oct_pt *p, double eps2) {
     double ax = 0.0, ay = 0.0, az = 0.0;
-    for (int j = 0; j < l->n; j++) {
+    double px = p->x, py = p->y, pz = p->z;
+    int j = 0;
+    for (; j + 1 < l->n; j += 2) {
+        const oct_pt *qa = &l->p[j], *qb = &l->p[j + 1];
+        double dxa = qa->x - px, dya = qa->y - py, dza = qa->z - pz;
+        double dxb = qb->x - px, dyb = qb->y - py, dzb = qb->z - pz;
+        double ra = dxa * dxa + dya * dya + dza * dza + eps2;
+        double rb = dxb * dxb + dyb * dyb + dzb * dzb + eps2;
+        double x = ra * sqrt(ra), y = rb * sqrt(rb), xy = x * y;
+        double sa, sb;
+        if (xy > 1e-280 && xy < 1e280) {
+            double q = 1.0 / xy;
+            sa = qa->m * y * q;
+            sb = qb->m * x * q;
+        } else {
+            sa = x > 0.0 ? qa->m / x : 0.0;
+            sb = y > 0.0 ? qb->m / y : 0.0;
+        }
+        ax += dxa * sa + dxb * sb;
+        ay += dya * sa + dyb * sb;
+        az += dza * sa + dzb * sb;
+    }
+    if (j < l->n) {
         const oct_pt *q = &l->p[j];
-        double dx = q->x - p->x, dy = q->y - p->y, dz = q->z - p->z;
+        double dx = q->x - px, dy = q->y - py, dz = q->z - pz;
         double r2 = dx * dx + dy * dy + dz * dz + eps2;
-        if (r2 <= 0.0) continue;
-        double inv = 1.0 / sqrt(r2);
-        double s = q->m * inv * inv * inv;
-        ax += dx * s;
-        ay += dy * s;
-        az += dz * s;
+        if (r2 > 0.0) {
+            double s = q->m / (r2 * sqrt(r2));
+            ax += dx * s;
+            ay += dy * s;
+            az += dz * s;
+        }
     }
     return vec3_make(ax, ay, az);
 }
