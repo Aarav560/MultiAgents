@@ -30,3 +30,18 @@ jobs:
           python3 "$GITHUB_WORKSPACE/skills/hive/scripts/hive.py" init
           cp "$GITHUB_WORKSPACE"/examples/saas-api/{context.md,plan.md} .hive/
           python3 .hive/bin/hive.py validate
+
+  spacesim:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: demos/spacesim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and unit-test orbit
+        run: make all test
+      - name: Scenario sweep
+        run: sh tests/run_scenarios.sh
