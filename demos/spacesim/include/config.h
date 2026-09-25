@@ -18,6 +18,7 @@ typedef struct {
     char csv_path[256];    /* key "csv"         default ""   empty = no CSV */
     char ppm_dir[256];     /* key "ppm"         default ""   empty = no images; else frames written as DIR/frame_000123.ppm */
     int ascii;             /* key "ascii"       default 0    1 = draw the system in the terminal every output step */
+    double fps;            /* key "fps"         default 20   terminal animation speed with ascii; 0 = as fast as possible */
     int width, height;     /* keys "width" "height" default 800 800 (images); ascii uses 100x40 */
     int trails;            /* key "trails"      default 1    image trails on/off */
     int collisions;        /* key "collisions"  default 1    merge colliding bodies */

@@ -27,12 +27,26 @@ trajectory log.
 
 ## Quick start
 
+Linux or macOS (needs `make` and a C compiler, such as Xcode Command Line Tools on macOS):
+
 ```
-make && ./build/orbit --scenario solar --ascii
+cd demos/spacesim
+make
+./build/orbit --scenario solar --ascii --scale 8e8
 ```
 
-This builds every module and runs the solar system scenario (the Sun, all eight planets, and
-Earth's Moon) for one simulated year, drawing it live in the terminal.
+Windows (needs gcc, clang or Visual Studio; `build.bat` prints install hints if none is found):
+
+```
+cd demos\spacesim
+build.bat
+build\orbit.exe --scenario solar --ascii --scale 8e8
+```
+
+This builds every module and animates the inner solar system in the terminal for one simulated year
+(about 10 seconds at the default `--fps 20`), leaving orbit trails. Drop `--scale` to auto-fit the
+whole system out to Neptune. Try `--scenario figure8`, `binary`, `hohmann`, or
+`disk --gravity bh` for a 1,500-particle galaxy. `--list` shows every scenario.
 
 To render an animation instead:
 
@@ -70,6 +84,7 @@ Run `./build/orbit --list` to see this list from the CLI, and `./build/orbit --s
 `orbit` targets C11 and compiles clean under
 `-std=c11 -Wall -Wextra -Wpedantic -Werror -O2`, linking only `-lm`. See `docs/usage.md` for the
 full Makefile target list (`make test`, `make bench`, `make run SCENARIO=name`, `make clean`).
+On Windows, `build.bat` builds `build\orbit.exe` and `build.bat test` builds and runs every unit test.
 
 ## How this was built
 

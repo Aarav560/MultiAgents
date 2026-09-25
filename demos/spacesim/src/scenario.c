@@ -174,7 +174,7 @@ static int scenario_figure8(world *w, scenario_info *info) {
     world_add(w, &b3);
 
     world_recenter(w);
-    set_info(info, 0.001, 6.3259, 1.2, "Chenciner-Montgomery figure-eight three-body choreography");
+    set_info(info, 0.001, 6.3259, 1.1 * 2.2 / 800.0, "Chenciner-Montgomery figure-eight three-body choreography");
     return 0;
 }
 

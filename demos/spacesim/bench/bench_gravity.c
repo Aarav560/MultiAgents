@@ -1,7 +1,6 @@
-#define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include "platform.h"
 #include <math.h>
 
 #ifndef M_PI
@@ -91,17 +90,13 @@ int main(int argc, char **argv) {
     }
 
     /* Compute reference direct gravity and time it */
-    struct timespec t0, t1;
     int iterations = 5;
 
-    clock_gettime(CLOCK_MONOTONIC, &t0);
+    double t0 = plat_now();
     for (int iter = 0; iter < iterations; iter++) {
         gravity_direct(&w, NULL);
     }
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-
-    double time_direct = (t1.tv_sec - t0.tv_sec) * 1000.0 +
-                         (t1.tv_nsec - t0.tv_nsec) / 1e6;
+    double time_direct = (plat_now() - t0) * 1000.0;
     double ms_per_direct = time_direct / iterations;
 
     /* Store direct accelerations */
@@ -127,14 +122,11 @@ int main(int argc, char **argv) {
         }
 
         /* Time Barnes-Hut */
-        clock_gettime(CLOCK_MONOTONIC, &t0);
+        t0 = plat_now();
         for (int iter = 0; iter < iterations; iter++) {
             gravity_barnes_hut(&w, &params);
         }
-        clock_gettime(CLOCK_MONOTONIC, &t1);
-
-        double time_bh = (t1.tv_sec - t0.tv_sec) * 1000.0 +
-                         (t1.tv_nsec - t0.tv_nsec) / 1e6;
+        double time_bh = (plat_now() - t0) * 1000.0;
         double ms_per_bh = time_bh / iterations;
         double speedup = ms_per_direct / ms_per_bh;
 

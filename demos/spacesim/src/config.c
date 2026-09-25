@@ -11,6 +11,7 @@ void config_defaults(sim_config *c) {
     strcpy(c->integrator, "leapfrog");
     strcpy(c->gravity, "direct");
     c->theta = 0.5;
+    c->fps = 20.0;
     c->dt = 0.0;
     c->duration = 0.0;
     c->steps = 0;
@@ -122,6 +123,12 @@ int config_set(sim_config *c, const char *key, const char *value) {
         double x;
         if (parse_double(value, &x) != 0) return -2;
         c->softening = x;
+        return 0;
+    }
+    if (strcmp(key, "fps") == 0) {
+        double x;
+        if (parse_double(value, &x) != 0 || x < 0.0) return -2;
+        c->fps = x;
         return 0;
     }
     if (strcmp(key, "scale") == 0) {

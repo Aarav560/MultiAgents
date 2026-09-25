@@ -34,6 +34,7 @@ static const opt_map value_opts[] = {
     {"every", "every"},
     {"softening", "softening"},
     {"scale", "scale"},
+    {"fps", "fps"},
     {"csv", "csv"},
     {"ppm", "ppm"},
     {"width", "width"},
@@ -76,6 +77,7 @@ void cli_usage(FILE *out, const char *prog) {
     fprintf(out, "  --height N          image height, pixels\n");
     fprintf(out, "  --seed N            RNG seed\n");
     fprintf(out, "  --ascii             draw the system in the terminal\n");
+    fprintf(out, "  --fps N             ascii animation frames per second (default 20, 0 = no delay)\n");
     fprintf(out, "  --no-trails         disable image motion trails\n");
     fprintf(out, "  --no-collisions     disable collision merging\n");
     fprintf(out, "  --quiet             suppress the per-output status line\n");
@@ -84,11 +86,8 @@ void cli_usage(FILE *out, const char *prog) {
     fprintf(out, "  --help, -h          show this help and exit\n");
 }
 
-static void list_scenarios(void) {
-    int n = scenario_count();
-    for (int i = 0; i < n; i++) {
-        printf("%s\n", scenario_name(i));
-    }
+void cli_list_scenarios(FILE *out) {
+    for (int i = 0; i < scenario_count(); i++) fprintf(out, "%s\n", scenario_name(i));
 }
 
 /* Splits "--key=value" into key/value (both pointing inside a mutable copy of arg).
@@ -127,7 +126,7 @@ int cli_parse(int argc, char **argv, sim_config *cfg, char *err, size_t errlen) 
             return 1;
         }
         if (strcmp(raw, "--list") == 0) {
-            list_scenarios();
+            cli_list_scenarios(stdout);
             return 1;
         }
 

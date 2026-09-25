@@ -26,7 +26,10 @@ int render_ascii(const world *w, char *buf, size_t buflen, int cols, int rows, d
     double effective_scale = scale;
     if (effective_scale == 0.0) {
         double extent = world_extent(w);
-        effective_scale = (extent * 1.1) / ((cols - 2) / 2.0);
+        /* Fit both axes. A terminal cell is about twice as tall as it is wide, so one
+           row spans two cells' worth of distance (see grid_y below). */
+        double half_w = (cols - 2) / 2.0, half_h = (double)(rows - 2);
+        effective_scale = (extent * 1.1) / (half_w < half_h ? half_w : half_h);
         if (effective_scale <= 0.0) {
             effective_scale = 1.0;
         }
@@ -77,7 +80,7 @@ int render_ascii(const world *w, char *buf, size_t buflen, int cols, int rows, d
 
         /* Convert to grid coordinates (center is at (cols-1)/2, (rows-1)/2) */
         double grid_x = rel_pos.x / effective_scale;
-        double grid_y = rel_pos.y / effective_scale;
+        double grid_y = rel_pos.y / (2.0 * effective_scale); /* 2:1 character aspect */
 
         /* Grid origin at center, using integer division for center */
         int center_col = (cols - 1) / 2;

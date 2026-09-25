@@ -45,3 +45,21 @@ jobs:
         run: make all test
       - name: Scenario sweep
         run: sh tests/run_scenarios.sh
+
+  spacesim-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: demos/spacesim
+        shell: cmd
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and unit-test orbit with build.bat
+        run: build.bat test
+      - name: Run scenarios
+        run: |
+          build\orbit.exe --scenario figure8 --integrator yoshida --quiet || exit /b 1
+          build\orbit.exe --scenario hohmann --quiet || exit /b 1
+          build\orbit.exe --scenario solar --ascii --fps 0 --steps 200 --quiet > NUL || exit /b 1
+          build\orbit.exe --scenario cluster --gravity bh --steps 50 --ppm out\cluster --quiet || exit /b 1
+          if not exist out\cluster\frame_000000.ppm exit /b 1

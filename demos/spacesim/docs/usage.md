@@ -25,7 +25,8 @@ PPM frames into a video, and the Makefile targets.
 | `--width N` | `800` | Image width in pixels. |
 | `--height N` | `800` | Image height in pixels. |
 | `--seed N` | `42` | RNG seed, used by scenarios that sample randomly (`cluster`). |
-| `--ascii` | off | Draw the system in the terminal at every output step. |
+| `--ascii` | off | Draw the system in the terminal at every output step, with orbit trails and a legend. |
+| `--fps N` | `20` | ASCII animation speed in frames per second; `0` draws as fast as possible. |
 | `--no-trails` | trails on | Disable motion-trail fading on PPM frames. |
 | `--no-collisions` | collisions on | Disable merging of overlapping bodies. |
 | `--quiet` | off | Suppress the per-output status line. |
@@ -135,8 +136,12 @@ viewer or `ffmpeg` can read directly.
 `--ascii` draws the system directly in the terminal at every output step: an x-y projection
 centered on the center of mass, using a distinct glyph per body kind (`*` star, `O` planet,
 `o` moon, `:` asteroid, `A` spacecraft, `.` particle; when two bodies share a cell the heavier
-one wins), inside a `+-|` border. This needs no output files and is the fastest way to sanity-
-check a scenario or watch a run live.
+one wins), inside a `+-|` border. Characters are about twice as tall as they are wide, so each row covers
+twice the distance of a column and orbits look round. The zoom is fixed at the first frame (auto-fit
+to the whole system, or `--scale`), trails of `.` mark where bodies have been (scenes with more than
+64 bodies skip trails), and a legend line shows the scenario, simulated time and body count.
+Frames are paced to `--fps` (default 20), so a default run plays for about 10 seconds. This needs no
+output files and is the fastest way to sanity-check a scenario or watch a run live.
 
 ## Turning PPM frames into a video
 

@@ -21,5 +21,7 @@ int cli_parse(int argc, char **argv, sim_config *cfg, char *err, size_t errlen);
 
 /* Prints a usage summary listing every option to `out`. */
 void cli_usage(FILE *out, const char *prog);
+/* Prints one scenario name per line (what --list shows). */
+void cli_list_scenarios(FILE *out);
 
 #endif

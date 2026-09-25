@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
 #include "sim.h"
 
 #include "collision.h"
@@ -7,17 +6,15 @@
 #include "integrator.h"
 #include "octree.h"
 #include "output_csv.h"
+#include "platform.h"
 #include "render_ascii.h"
 #include "render_ppm.h"
 #include "scenario.h"
 #include "spacecraft.h"
 
-#include <errno.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <time.h>
 
 #define ASCII_COLS 100
 #define ASCII_ROWS 40
@@ -38,6 +35,10 @@ struct simulation {
     image im;
     int have_image;
     char *ascii_buf;
+    char *ascii_trail; /* cells any body has visited, drawn as '.' behind the bodies */
+    double ascii_cell; /* metres per cell, fixed at the first frame so the view doesn't jump */
+    double user_scale; /* --scale as given (0 = auto) */
+    double next_frame; /* plat_now() time when the next ascii frame may be drawn */
     flight_plan plan;
     int is_hohmann;
     hohmann ho;
@@ -57,15 +58,14 @@ static int mkdir_p(const char *path) {
     if (n == 0 || n >= sizeof(buf)) return -1;
     memcpy(buf, path, n + 1);
     for (size_t i = 1; i <= n; i++) {
-        if (buf[i] == '/' || buf[i] == '\0') {
+        if (buf[i] == '/' || buf[i] == '\\' || buf[i] == '\0') {
             char c = buf[i];
             buf[i] = '\0';
-            if (mkdir(buf, 0755) != 0 && errno != EEXIST) return -1;
+            if (buf[i - 1] != ':' && plat_mkdir(buf) != 0) return -1; /* skip Windows drive "C:" */
             buf[i] = c;
         }
     }
-    struct stat st;
-    return (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) ? 0 : -1;
+    return plat_is_dir(path) ? 0 : -1;
 }
 
 static int find_index(const world *w, const char *name) {
@@ -119,7 +119,8 @@ static int setup_outputs(simulation *s, char *err, size_t errlen) {
     }
     if (c->ascii) {
         s->ascii_buf = malloc((size_t)ASCII_ROWS * (ASCII_COLS + 1) + 1);
-        if (!s->ascii_buf) {
+        s->ascii_trail = calloc((size_t)ASCII_ROWS * (ASCII_COLS + 1) + 1, 1);
+        if (!s->ascii_buf || !s->ascii_trail) {
             set_err(err, errlen, "out of memory", NULL);
             return -1;
         }
@@ -171,6 +172,7 @@ simulation *sim_create(const sim_config *cfg, char *err, size_t errlen) {
         return NULL;
     }
     s->cfg = *cfg;
+    s->user_scale = cfg->scale;
     flight_plan_init(&s->plan);
     if (world_init(&s->w, 16) != 0) {
         free(s);
@@ -195,6 +197,7 @@ void sim_destroy(simulation *s) {
     if (s->csv) csv_close(s->csv);
     if (s->have_image) image_free(&s->im);
     free(s->ascii_buf);
+    free(s->ascii_trail);
     flight_plan_free(&s->plan);
     world_free(&s->w);
     free(s);
@@ -222,6 +225,46 @@ static void hohmann_burns(simulation *s) {
     s->burns_done++;
 }
 
+/* Simulated time as a human-readable string: days/years in SI runs, plain t in N-body units. */
+static void format_time(const world *w, char *out, size_t n) {
+    if (w->G == 1.0) snprintf(out, n, "t = %.3f", w->t);
+    else if (w->t < 2.0 * 86400.0) snprintf(out, n, "t = %.2f h", w->t / 3600.0);
+    else if (w->t < 2.0 * 365.25 * 86400.0) snprintf(out, n, "t = %.1f days", w->t / 86400.0);
+    else snprintf(out, n, "t = %.2f years", w->t / (365.25 * 86400.0));
+}
+
+/* One terminal frame: bodies over their trails, plus a legend line, paced to cfg.fps. */
+static void draw_ascii(simulation *s, FILE *log) {
+    const sim_config *c = &s->cfg;
+    size_t len = (size_t)ASCII_ROWS * (ASCII_COLS + 1) + 1;
+    if (s->ascii_cell <= 0.0) {
+        if (s->user_scale > 0.0) {
+            s->ascii_cell = s->user_scale * (c->width > 0 ? c->width : 800) / ASCII_COLS;
+        } else { /* same fit as render_ascii's auto mode, frozen at the first frame */
+            double half_w = (ASCII_COLS - 2) / 2.0, half_h = (double)(ASCII_ROWS - 2);
+            s->ascii_cell = world_extent(&s->w) * 1.1 / (half_w < half_h ? half_w : half_h);
+            if (s->ascii_cell <= 0.0) s->ascii_cell = 1.0;
+        }
+    }
+    if (render_ascii(&s->w, s->ascii_buf, len, ASCII_COLS, ASCII_ROWS, s->ascii_cell) != 0) return;
+    for (size_t i = 0; i + 1 < len; i++) {
+        char g = s->ascii_buf[i];
+        int body = g != ' ' && g != '\n' && g != '|' && g != '-' && g != '+';
+        if (body && s->w.count <= 64) s->ascii_trail[i] = 1; /* trails would flood crowded scenes */
+        else if (g == ' ' && s->ascii_trail[i]) s->ascii_buf[i] = '.';
+    }
+    if (c->fps > 0.0) { /* pace the animation so it can be watched */
+        double now = plat_now();
+        if (s->next_frame > now) plat_sleep(s->next_frame - now);
+        s->next_frame = (s->next_frame > now ? s->next_frame : now) + 1.0 / c->fps;
+    }
+    char tbuf[64];
+    format_time(&s->w, tbuf, sizeof tbuf);
+    fprintf(log, "\033[H\033[2J%s %s | %s | %d bodies | * star  O planet  o moon  A ship  . trail\n",
+            s->ascii_buf, c->scenario, tbuf, world_alive(&s->w));
+    fflush(log);
+}
+
 static int write_outputs(simulation *s, long frame, FILE *log, double e0) {
     const sim_config *c = &s->cfg;
     if (s->csv && csv_write_frame(s->csv, &s->w) != 0) return -1;
@@ -233,13 +276,7 @@ static int write_outputs(simulation *s, long frame, FILE *log, double e0) {
         snprintf(path, sizeof(path), "%s/frame_%06ld.ppm", c->ppm_dir, frame);
         if (image_write_ppm(&s->im, path) != 0) return -1;
     }
-    if (s->ascii_buf && log) {
-        double cell = c->scale * (c->width > 0 ? c->width : 800) / ASCII_COLS;
-        size_t len = (size_t)ASCII_ROWS * (ASCII_COLS + 1) + 1;
-        if (render_ascii(&s->w, s->ascii_buf, len, ASCII_COLS, ASCII_ROWS, cell) == 0) {
-            fprintf(log, "\033[H\033[2J%s", s->ascii_buf);
-        }
-    }
+    if (s->ascii_buf && log) draw_ascii(s, log);
     if (!c->quiet && log) {
         diag d;
         diagnostics_compute(&s->w, &d);
@@ -279,8 +316,8 @@ int sim_run(simulation *s, FILE *log) {
     diag d0;
     diagnostics_compute(&s->w, &d0);
     double pscale = momentum_scale(&s->w);
-    struct timespec t0, t1;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
+    if (s->ascii_buf) plat_enable_ansi();
+    double t0 = plat_now();
     void *ctx = s->accel == gravity_barnes_hut ? (void *)&s->bh : NULL;
     long frame = 0;
     int rc = 0;
@@ -303,8 +340,7 @@ int sim_run(simulation *s, FILE *log) {
             rc = write_outputs(s, frame++, log, d0.total);
         }
     }
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    double wall = (double)(t1.tv_sec - t0.tv_sec) + 1e-9 * (double)(t1.tv_nsec - t0.tv_nsec);
+    double wall = plat_now() - t0;
     if (log) print_summary(s, log, &d0, pscale, wall);
     return rc;
 }

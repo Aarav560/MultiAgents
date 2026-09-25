@@ -43,7 +43,7 @@ bench: build/bench_gravity
 	./build/bench_gravity
 
 run: build/orbit
-	./build/orbit --scenario $(SCENARIO)
+	./build/orbit --scenario $(SCENARIO) --ascii
 
 clean:
 	rm -rf build

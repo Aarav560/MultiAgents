@@ -218,17 +218,17 @@ static void test_list_returns_1_and_prints_scenarios(void) {
     config_defaults(&cfg);
     MAKE_ARGV((char *)"--list");
 
+    char err[256] = {0};
+    int rc = cli_parse(argc_, argv_, &cfg, err, sizeof err); /* prints the list to stdout */
+    CHECK(rc == 1);
+
+    /* Check the list itself through the FILE* entry point (assigning stdout isn't portable). */
     FILE *tmp = tmpfile();
     CHECK(tmp != NULL);
     if (!tmp) {
         return;
     }
-    FILE *saved_stdout = stdout;
-    stdout = tmp;
-    char err[256] = {0};
-    int rc = cli_parse(argc_, argv_, &cfg, err, sizeof err);
-    stdout = saved_stdout;
-    CHECK(rc == 1);
+    cli_list_scenarios(tmp);
 
     rewind(tmp);
     char line[128];
@@ -267,17 +267,17 @@ static void test_help_usage_redirected(void) {
     config_defaults(&cfg);
     MAKE_ARGV((char *)"--help");
 
+    char err[256] = {0};
+    int rc = cli_parse(argc_, argv_, &cfg, err, sizeof err); /* prints usage to stdout */
+    CHECK(rc == 1);
+
+    /* Check the usage text through the FILE* entry point (assigning stdout isn't portable). */
     FILE *tmp = tmpfile();
     CHECK(tmp != NULL);
     if (!tmp) {
         return;
     }
-    FILE *saved_stdout = stdout;
-    stdout = tmp;
-    char err[256] = {0};
-    int rc = cli_parse(argc_, argv_, &cfg, err, sizeof err);
-    stdout = saved_stdout;
-    CHECK(rc == 1);
+    cli_usage(tmp, "orbit");
 
     long size = ftell(tmp);
     CHECK(size > 0);
