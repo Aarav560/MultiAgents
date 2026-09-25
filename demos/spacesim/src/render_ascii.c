@@ -3,6 +3,7 @@
 #include "vec3.h"
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 
 typedef struct {
     char glyph;
@@ -78,9 +79,11 @@ int render_ascii(const world *w, char *buf, size_t buflen, int cols, int rows, d
         double grid_x = rel_pos.x / effective_scale;
         double grid_y = rel_pos.y / effective_scale;
 
-        /* Grid origin at center */
-        int cx = (int)((cols - 1) / 2.0 + grid_x + 0.5);
-        int cy = (int)((rows - 1) / 2.0 - grid_y + 0.5); /* y-axis is inverted in display */
+        /* Grid origin at center, using integer division for center */
+        int center_col = (cols - 1) / 2;
+        int center_row = (rows - 1) / 2;
+        int cx = center_col + (int)floor(grid_x + 0.5);
+        int cy = center_row - (int)floor(grid_y + 0.5); /* y-axis is inverted in display */
 
         /* Check if within interior bounds (not on border) */
         if (cx > 0 && cx < cols - 1 && cy > 0 && cy < rows - 1) {
