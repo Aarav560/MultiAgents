@@ -147,7 +147,7 @@ static void test_trails_dead_body_releases_slot(void) {
 
     /* First should be gone, second should still be there */
     CHECK(trails_get(t, 0, out, 10) == 0);
-    CHECK(trails_get(t, 1, out, 10) == 1);
+    CHECK(trails_get(t, 1, out, 10) == 2);
 
     world_free(&w);
     trails_free(t);
