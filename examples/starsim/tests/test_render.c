@@ -86,17 +86,18 @@ static void test_disc_coverage(void) {
 static void test_line_endpoints_lit(void) {
     canvas c;
     canvas_init(&c, 50, 50);
-    canvas_line(&c, 5.0, 5.0, 40.0, 5.0, rgb(255, 255, 255), 255);
+    /* pixel-center coordinates so the endpoint falls fully in one pixel */
+    canvas_line(&c, 5.5, 5.5, 40.5, 5.5, rgb(255, 255, 255), 255);
     CHECK(rgb_r(c.px[5 * 50 + 5]) > 200);
     CHECK(rgb_r(c.px[5 * 50 + 40]) > 200);
 
     canvas_clear(&c, 0);
-    canvas_line(&c, 10.0, 10.0, 10.0, 30.0, rgb(255, 255, 255), 255);
+    canvas_line(&c, 10.5, 10.5, 10.5, 30.5, rgb(255, 255, 255), 255);
     CHECK(rgb_r(c.px[10 * 50 + 10]) > 200);
     CHECK(rgb_r(c.px[30 * 50 + 10]) > 200);
 
     canvas_clear(&c, 0);
-    canvas_line(&c, 5.0, 5.0, 30.0, 30.0, rgb(255, 255, 255), 255);
+    canvas_line(&c, 5.5, 5.5, 30.5, 30.5, rgb(255, 255, 255), 255);
     CHECK(rgb_r(c.px[5 * 50 + 5]) > 100);
     CHECK(rgb_r(c.px[30 * 50 + 30]) > 100);
 
@@ -106,9 +107,9 @@ static void test_line_endpoints_lit(void) {
 static void test_ring(void) {
     canvas c;
     canvas_init(&c, 60, 60);
-    canvas_ring(&c, 30.0, 30.0, 15.0, rgb(255, 255, 255), 255);
-    /* on the ring */
-    CHECK(rgb_r(c.px[30 * 60 + 45]) > 150);
+    canvas_ring(&c, 30.5, 30.5, 15.0, rgb(255, 255, 255), 255);
+    /* on the ring, at a pixel center exactly r from the center */
+    CHECK(rgb_r(c.px[30 * 60 + 45]) > 200);
     /* well inside the ring (hollow) stays dark */
     CHECK(rgb_r(c.px[30 * 60 + 30]) == 0);
     canvas_free(&c);
