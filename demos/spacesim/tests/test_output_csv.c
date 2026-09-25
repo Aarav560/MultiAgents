@@ -30,10 +30,12 @@ static void test_csv_basic(void) {
     CHECK(f != NULL);
 
     char line[512];
-    CHECK(fgets(line, sizeof line, f) != NULL);
+    char *ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL);
     CHECK(strcmp(line, "step,t,id,name,kind,mass,x,y,z,vx,vy,vz\n") == 0);
 
-    CHECK(fgets(line, sizeof line, f) != NULL);
+    ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL);
     /* Verify it contains the body id 0 and name Earth */
     CHECK(strstr(line, ",0,Earth,planet,") != NULL);
 
@@ -67,8 +69,10 @@ static void test_csv_dead_bodies_skipped(void) {
     CHECK(f != NULL);
 
     char line[512];
-    fgets(line, sizeof line, f); /* header */
-    fgets(line, sizeof line, f); /* first body */
+    char *ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* header */
+    ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* first body */
     CHECK(strstr(line, "Alive") != NULL);
 
     int lines = 1;
@@ -99,8 +103,10 @@ static void test_csv_name_escaping(void) {
     CHECK(f != NULL);
 
     char line[512];
-    fgets(line, sizeof line, f); /* header */
-    fgets(line, sizeof line, f); /* data row */
+    char *ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* header */
+    ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* data row */
 
     /* Expected: id,name part should be: ,0,"Name,with""quote",
        The quote is doubled in the escaped field */
@@ -131,8 +137,10 @@ static void test_csv_double_precision(void) {
     CHECK(f != NULL);
 
     char line[512];
-    fgets(line, sizeof line, f); /* header */
-    fgets(line, sizeof line, f); /* data row */
+    char *ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* header */
+    ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* data row */
 
     /* Parse back the mass field (6th field) and verify it round-trips */
     char *p = line;
@@ -177,10 +185,12 @@ static void test_csv_multiple_frames(void) {
     CHECK(f != NULL);
 
     char line[512];
-    fgets(line, sizeof line, f); /* header */
+    char *ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* header */
 
     for (int i = 0; i < 3; i++) {
-        CHECK(fgets(line, sizeof line, f) != NULL);
+        ret = fgets(line, sizeof line, f);
+        CHECK(ret != NULL);
         char t_str[64];
         sscanf(line, "%*[^,],%63[^,]", t_str);
         double t_read = strtod(t_str, NULL);

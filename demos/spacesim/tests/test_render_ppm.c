@@ -6,6 +6,8 @@
 
 #include "test.h"
 
+#define TEST_PI 3.14159265358979323846
+
 static void test_init_fill_free(void) {
     image im;
     CHECK(image_init(&im, 10, 5) == 0);
@@ -17,15 +19,13 @@ static void test_init_fill_free(void) {
     image_fill(&im, white);
     for (int i = 0; i < im.w * im.h * 3; i++) CHECK(im.px[i] == 255);
 
-    CHECK(image_init(&im, 0, 5) == -1 || 1); /* placeholder, real bad-size check below */
     image_free(&im);
     CHECK(im.px == NULL);
 
     image bad;
     CHECK(image_init(&bad, 0, 5) == -1);
     CHECK(image_init(&bad, 5, -1) == -1);
-    CHECK(image_init(&bad, NULL ? 1 : 1, 1) == 0);
-    image_free(&bad);
+    CHECK(image_init(NULL, 5, 5) == -1);
 }
 
 static void test_plot_bounds(void) {
@@ -79,7 +79,7 @@ static void test_disc_area(void) {
     for (int i = 0; i < im.w * im.h; i++) {
         if (im.px[i * 3] != 0) count++;
     }
-    double expected = M_PI * r * r;
+    double expected = TEST_PI * r * r;
     double rel = fabs(count - expected) / expected;
     CHECK(rel <= 0.15);
 

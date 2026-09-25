@@ -6,7 +6,7 @@
 #include <string.h>
 
 /* Test: buffer too small returns -1 */
-TEST(buffer_too_small) {
+static void buffer_too_small(void) {
     world w;
     world_init(&w, 4);
 
@@ -21,7 +21,7 @@ TEST(buffer_too_small) {
 }
 
 /* Test: valid buffer renders without error */
-TEST(valid_buffer) {
+static void valid_buffer(void) {
     world w;
     world_init(&w, 4);
 
@@ -36,7 +36,7 @@ TEST(valid_buffer) {
 }
 
 /* Test: border is drawn correctly */
-TEST(border_correct) {
+static void border_correct(void) {
     world w;
     world_init(&w, 4);
 
@@ -67,7 +67,7 @@ TEST(border_correct) {
 }
 
 /* Test: star at COM lands in center cell */
-TEST(star_at_com_center) {
+static void star_at_com_center(void) {
     world w;
     world_init(&w, 4);
 
@@ -91,7 +91,7 @@ TEST(star_at_com_center) {
 }
 
 /* Test: glyph priority when bodies share a cell (heavier wins) */
-TEST(glyph_priority) {
+static void glyph_priority(void) {
     world w;
     world_init(&w, 4);
 
@@ -115,7 +115,7 @@ TEST(glyph_priority) {
 }
 
 /* Test: bodies outside view are clipped, not on border */
-TEST(clip_outside_view) {
+static void clip_outside_view(void) {
     world w;
     world_init(&w, 4);
 
@@ -140,7 +140,7 @@ TEST(clip_outside_view) {
 }
 
 /* Test: auto-fit scale keeps every body inside */
-TEST(autofit_scale) {
+static void autofit_scale(void) {
     world w;
     world_init(&w, 8);
 
@@ -181,7 +181,7 @@ TEST(autofit_scale) {
 }
 
 /* Test: different glyphs for different kinds */
-TEST(kind_glyphs) {
+static void kind_glyphs(void) {
     world w;
     world_init(&w, 10);
 
@@ -222,7 +222,7 @@ TEST(kind_glyphs) {
 }
 
 /* Test: dead bodies are not rendered */
-TEST(dead_bodies_skipped) {
+static void dead_bodies_skipped(void) {
     world w;
     world_init(&w, 4);
 
@@ -247,7 +247,7 @@ TEST(dead_bodies_skipped) {
 }
 
 /* Test: line endings are correct */
-TEST(line_endings) {
+static void line_endings(void) {
     world w;
     world_init(&w, 4);
 
