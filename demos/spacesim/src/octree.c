@@ -21,7 +21,7 @@ typedef struct {
  * skip is the index just past its subtree, so the walk needs no stack. */
 typedef struct {
     double cx, cy, cz, mass; /* center of mass, total mass */
-    double s2;               /* (edge length)^2 for the opening test */
+    double s2;               /* size^2: largest edge of the bodies' bounding box, squared */
     double bx, by, bz, half; /* cube center and half edge (containment test) */
     int skip;                /* next node after this subtree */
     int first, nbodies;      /* body range in the packed arrays */
@@ -43,9 +43,9 @@ struct octree {
 };
 
 /* Subtrees with at most this many bodies are summed directly once opened. */
-#define OCT_BUCKET 8
+#define OCT_BUCKET 4
 /* gravity_barnes_hut shares one interaction list among subtrees of at most this many bodies. */
-#define OCT_GROUP 64
+#define OCT_GROUP 128
 
 static int node_new(octree *t, vec3 center, double half) {
     if (t->count == t->capacity) {
@@ -132,23 +132,38 @@ static void finalize_com(octree *t) {
 }
 
 /* Replaces each node's size by the largest edge of the bounding box of its bodies (never
- * larger than the cube), a tighter "size" for the opening test. Bodies of a node are the
- * contiguous range [first, first + nbodies) of the packed array. */
-static void body_extent(octree *t) {
-    for (int i = 0; i < t->count; i++) {
+ * larger than the cube), a tighter "size" for the opening test. Boxes are merged bottom-up:
+ * in preorder the children of i start at i + 1 and are chained by skip. */
+static int body_extent(octree *t) {
+    double *box = malloc((size_t)t->count * 6 * sizeof *box);
+    if (!box) return -1;
+    for (int i = t->count - 1; i >= 0; i--) {
         oct_hot *h = &t->hot[i];
-        const oct_pt *p = &t->pts[h->first];
-        double lo[3] = {p->x, p->y, p->z}, hi[3] = {p->x, p->y, p->z};
-        for (int j = 1; j < h->nbodies; j++) {
-            double q[3] = {p[j].x, p[j].y, p[j].z};
-            for (int k = 0; k < 3; k++) {
-                lo[k] = fmin(lo[k], q[k]);
-                hi[k] = fmax(hi[k], q[k]);
+        double *bx = &box[6 * i];
+        bx[0] = bx[1] = bx[2] = INFINITY;
+        bx[3] = bx[4] = bx[5] = -INFINITY;
+        if (h->skip == i + 1) {
+            for (int j = h->first; j < h->first + h->nbodies; j++) {
+                double q[3] = {t->pts[j].x, t->pts[j].y, t->pts[j].z};
+                for (int k = 0; k < 3; k++) {
+                    bx[k] = fmin(bx[k], q[k]);
+                    bx[3 + k] = fmax(bx[3 + k], q[k]);
+                }
+            }
+        } else {
+            for (int c = i + 1; c < h->skip; c = t->hot[c].skip) {
+                const double *cb = &box[6 * c];
+                for (int k = 0; k < 3; k++) {
+                    bx[k] = fmin(bx[k], cb[k]);
+                    bx[3 + k] = fmax(bx[3 + k], cb[3 + k]);
+                }
             }
         }
-        double e = fmax(hi[0] - lo[0], fmax(hi[1] - lo[1], hi[2] - lo[2]));
+        double e = fmax(bx[3] - bx[0], fmax(bx[4] - bx[1], bx[5] - bx[2]));
         h->s2 = e * e;
     }
+    free(box);
+    return 0;
 }
 
 /* Lays the build tree out in preorder with packed body ranges. Children always have a larger
@@ -201,7 +216,7 @@ static int flatten(octree *t, const world *w) {
             for (int k = 7; k >= 0; k--)
                 if (b->child[k] >= 0) stack[sp++] = b->child[k];
         }
-        body_extent(t);
+        ok = body_extent(t) == 0;
     }
     free(size);
     free(bcount);

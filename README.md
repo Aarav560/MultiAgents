@@ -211,6 +211,7 @@ terminal and PPM output, a CLI and INI configs.
   20 concurrent workers (haiku, sonnet and opus picked per task).
 - **Mid-run steering:** the benchmark showed Barnes-Hut barely beating direct summation, so the orchestrator
   appended an optimization task to the live plan and dispatched it alongside the integration work.
+  At n = 20,000, theta 0.5 went from 1.2x to 5.95x faster than direct and theta 0.8 from 3.5x to 11x, with lower error.
 - **Result:** about 7,500 lines of C across 67 files. 15 test suites (5,400+ checks) and a 24-check scenario sweep pass,
   and everything compiles clean with `-Wall -Wextra -Wpedantic -Werror`. The figure-8 three-body orbit conserves energy to 1e-15
   over a full period, and the Hohmann transfer lands 4.7 km from the 42,164 km GEO target.
