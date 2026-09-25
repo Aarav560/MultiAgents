@@ -208,7 +208,7 @@ static void test_unknown_key(void) {
 
 static void test_file_basic(void) {
     /* Create a test INI file */
-    FILE *f = fopen("/tmp/test_config.ini", "w");
+    FILE *f = fopen("build/test_config.ini", "w");
     fprintf(f, "scenario = earth-moon\n");
     fprintf(f, "integrator = rk4\n");
     fprintf(f, "dt = 60\n");
@@ -219,7 +219,7 @@ static void test_file_basic(void) {
     config_defaults(&c);
 
     char err[256] = "";
-    CHECK(config_load_file(&c, "/tmp/test_config.ini", err, sizeof err) == 0);
+    CHECK(config_load_file(&c, "build/test_config.ini", err, sizeof err) == 0);
     CHECK(strcmp(c.scenario, "earth-moon") == 0);
     CHECK(strcmp(c.integrator, "rk4") == 0);
     CHECK_NEAR(c.dt, 60.0, 1e-9);
@@ -227,7 +227,7 @@ static void test_file_basic(void) {
 }
 
 static void test_file_comments(void) {
-    FILE *f = fopen("/tmp/test_config_comments.ini", "w");
+    FILE *f = fopen("build/test_config_comments.ini", "w");
     fprintf(f, "# This is a comment\n");
     fprintf(f, "scenario = solar\n");
     fprintf(f, "; This is another comment\n");
@@ -240,14 +240,14 @@ static void test_file_comments(void) {
     config_defaults(&c);
 
     char err[256] = "";
-    CHECK(config_load_file(&c, "/tmp/test_config_comments.ini", err, sizeof err) == 0);
+    CHECK(config_load_file(&c, "build/test_config_comments.ini", err, sizeof err) == 0);
     CHECK(strcmp(c.scenario, "solar") == 0);
     CHECK_NEAR(c.dt, 3600.0, 1e-9);
     CHECK(strcmp(c.gravity, "direct") == 0);
 }
 
 static void test_file_sections(void) {
-    FILE *f = fopen("/tmp/test_config_sections.ini", "w");
+    FILE *f = fopen("build/test_config_sections.ini", "w");
     fprintf(f, "[General]\n");
     fprintf(f, "scenario = cluster\n");
     fprintf(f, "[Simulation]\n");
@@ -258,13 +258,13 @@ static void test_file_sections(void) {
     config_defaults(&c);
 
     char err[256] = "";
-    CHECK(config_load_file(&c, "/tmp/test_config_sections.ini", err, sizeof err) == 0);
+    CHECK(config_load_file(&c, "build/test_config_sections.ini", err, sizeof err) == 0);
     CHECK(strcmp(c.scenario, "cluster") == 0);
     CHECK(strcmp(c.integrator, "yoshida") == 0);
 }
 
 static void test_file_whitespace(void) {
-    FILE *f = fopen("/tmp/test_config_whitespace.ini", "w");
+    FILE *f = fopen("build/test_config_whitespace.ini", "w");
     fprintf(f, "  scenario   =   figure8  \n");
     fprintf(f, "  integrator=euler  \n");
     fprintf(f, "dt=0.001\n");
@@ -274,7 +274,7 @@ static void test_file_whitespace(void) {
     config_defaults(&c);
 
     char err[256] = "";
-    CHECK(config_load_file(&c, "/tmp/test_config_whitespace.ini", err, sizeof err) == 0);
+    CHECK(config_load_file(&c, "build/test_config_whitespace.ini", err, sizeof err) == 0);
     CHECK(strcmp(c.scenario, "figure8") == 0);
     CHECK(strcmp(c.integrator, "euler") == 0);
     CHECK_NEAR(c.dt, 0.001, 1e-9);
@@ -282,7 +282,7 @@ static void test_file_whitespace(void) {
 
 static void test_file_crlf(void) {
     /* Write CRLF line endings */
-    FILE *f = fopen("/tmp/test_config_crlf.ini", "wb");
+    FILE *f = fopen("build/test_config_crlf.ini", "wb");
     fprintf(f, "scenario = binary\r\n");
     fprintf(f, "theta = 0.75\r\n");
     fprintf(f, "ascii = 1\r\n");
@@ -292,14 +292,14 @@ static void test_file_crlf(void) {
     config_defaults(&c);
 
     char err[256] = "";
-    CHECK(config_load_file(&c, "/tmp/test_config_crlf.ini", err, sizeof err) == 0);
+    CHECK(config_load_file(&c, "build/test_config_crlf.ini", err, sizeof err) == 0);
     CHECK(strcmp(c.scenario, "binary") == 0);
     CHECK_NEAR(c.theta, 0.75, 1e-9);
     CHECK(c.ascii == 1);
 }
 
 static void test_file_error_unknown_key(void) {
-    FILE *f = fopen("/tmp/test_config_bad_key.ini", "w");
+    FILE *f = fopen("build/test_config_bad_key.ini", "w");
     fprintf(f, "scenario = solar\n");
     fprintf(f, "invalid_key = value\n");
     fclose(f);
@@ -308,7 +308,7 @@ static void test_file_error_unknown_key(void) {
     config_defaults(&c);
 
     char err[256] = "";
-    int res = config_load_file(&c, "/tmp/test_config_bad_key.ini", err, sizeof err);
+    int res = config_load_file(&c, "build/test_config_bad_key.ini", err, sizeof err);
     CHECK(res == -1);
     CHECK(strlen(err) > 0);
     CHECK(strstr(err, "invalid_key") != NULL);
@@ -316,7 +316,7 @@ static void test_file_error_unknown_key(void) {
 }
 
 static void test_file_error_invalid_value(void) {
-    FILE *f = fopen("/tmp/test_config_bad_value.ini", "w");
+    FILE *f = fopen("build/test_config_bad_value.ini", "w");
     fprintf(f, "scenario = solar\n");
     fprintf(f, "width = -100\n");
     fclose(f);
@@ -325,7 +325,7 @@ static void test_file_error_invalid_value(void) {
     config_defaults(&c);
 
     char err[256] = "";
-    int res = config_load_file(&c, "/tmp/test_config_bad_value.ini", err, sizeof err);
+    int res = config_load_file(&c, "build/test_config_bad_value.ini", err, sizeof err);
     CHECK(res == -1);
     CHECK(strlen(err) > 0);
     CHECK(strstr(err, ":2:") != NULL);  /* Line 2 */
