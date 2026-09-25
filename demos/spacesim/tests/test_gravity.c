@@ -111,7 +111,8 @@ static void test_softening_caps_acceleration_at_zero(void) {
     CHECK(isfinite(w2.bodies[1].acc.x));
     double unsoftened = w2.G * 1.0 / (2e-6 * 2e-6); /* would diverge without softening */
     CHECK(vec3_len(w2.bodies[0].acc) < unsoftened);
-    double expected_near = w2.G * 1.0 / (0.1 * 0.1); /* eps dominates r here */
+    /* eps^2 dominates r^2 here, so |a| ~= G m r / eps^3 (small, not diverging). */
+    double expected_near = w2.G * 1.0 * 2e-6 / (0.1 * 0.1 * 0.1);
     CHECK_REL(vec3_len(w2.bodies[0].acc), expected_near, 1e-6);
 
     world_free(&w2);
