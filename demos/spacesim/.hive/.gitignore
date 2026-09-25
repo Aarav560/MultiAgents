@@ -1,0 +1,6 @@
+# hive runtime state
+status/
+requests/
+candidates/
+bin/
+board.md
