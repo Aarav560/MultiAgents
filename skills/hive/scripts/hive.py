@@ -748,12 +748,25 @@ def make_lanes(plan: "Plan", ready: list, slots: int, pack: int) -> list:
     lanes = [[t] for t in solo]
     if packable:
         free = max(1, slots - len(lanes))
-        size = min(pack, max(1, -(-len(packable) // free)))
         groups: dict = {}
         for t in packable:  # keep priority order inside each model group
             groups.setdefault((plan.model_for(t), plan.subagent_for(t)), []).append(t)
+        n = len(packable)
         for g in groups.values():
-            lanes += [g[i:i + size] for i in range(0, len(g), size)]
+            if n <= free:
+                lanes += [[t] for t in g]  # everything fits: full parallelism, no packing
+                continue
+            share = max(1, round(free * len(g) / n))  # this group's fair share of free slots
+            if -(-len(g) // pack) >= share:
+                lanes += [g[i:i + pack] for i in range(0, len(g), pack)]  # full lanes; extras wait
+            else:  # spread the group evenly over its share, lanes differ by at most one task
+                base, extra = divmod(len(g), share)
+                i = 0
+                for k in range(share):
+                    size = base + (1 if k >= share - extra else 0)
+                    if size:
+                        lanes.append(g[i:i + size])
+                    i += size
     prio = plan.critical_len()
     lanes.sort(key=lambda lane: -max(prio[t["id"]] for t in lane))
     return lanes[:slots]
