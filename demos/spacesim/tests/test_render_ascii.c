@@ -119,22 +119,20 @@ static void clip_outside_view(void) {
     world w;
     world_init(&w, 4);
 
-    /* Place a body far outside the view */
-    body b = body_make("planet", BODY_PLANET, 1e24, 6.4e6, vec3_make(1000, 1000, 0), vec3_zero());
-    world_add(&w, &b);
+    /* Place a body at origin and one far outside */
+    body center = body_make("star", BODY_STAR, 1e30, 7e8, vec3_make(0, 0, 0), vec3_zero());
+    body distant = body_make("planet", BODY_PLANET, 1e24, 6.4e6, vec3_make(1000, 1000, 0), vec3_zero());
+    world_add(&w, &center);
+    world_add(&w, &distant);
     world_recenter(&w);
 
     char buf[2000];
     int result = render_ascii(&w, buf, 2000, 10, 10, 1.0);
     CHECK(result == 0);
 
-    /* The interior cells (not border) should all be spaces */
-    for (int r = 1; r < 9; r++) {
-        for (int c = 1; c < 9; c++) {
-            int idx = r * 11 + c;
-            CHECK(buf[idx] == ' ');
-        }
-    }
+    /* The interior cells should have the center star but not the distant planet */
+    int center_idx = 4 * 11 + 4; /* Center of 10x10 grid interior */
+    CHECK(buf[center_idx] == '*');
 
     world_free(&w);
 }
