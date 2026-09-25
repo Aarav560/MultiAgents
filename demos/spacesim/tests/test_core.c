@@ -50,7 +50,6 @@ static void test_vec3_dot(void) {
 static void test_vec3_cross(void) {
     vec3 x = vec3_make(1.0, 0.0, 0.0);
     vec3 y = vec3_make(0.0, 1.0, 0.0);
-    vec3 z = vec3_make(0.0,0.0, 1.0);
 
     /* x cross y = z */
     vec3 c = vec3_cross(x, y);
