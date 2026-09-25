@@ -63,3 +63,45 @@ jobs:
           build\orbit.exe --scenario solar --ascii --fps 0 --steps 200 --quiet > NUL || exit /b 1
           build\orbit.exe --scenario cluster --gravity bh --steps 50 --ppm out\cluster --quiet || exit /b 1
           if not exist out\cluster\frame_000000.ppm exit /b 1
+
+  starsim:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: examples/starsim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install X11 and a virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q libx11-dev xvfb
+      - name: Build (windowed) and run unit tests
+        run: make all test
+      - name: Headless screenshots of every scenario
+        run: |
+          make headless
+          for i in 1 2 3 4 5 6 7; do ./build/starsim-headless --scenario $i --shot build/shot$i.ppm --frames 60; test -s build/shot$i.ppm; done
+      - name: Run the real window for a few seconds (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          timeout 5 xvfb-run -a ./build/starsim --scenario 4
+          code=$?
+          echo "exit code $code"
+          test $code -eq 124 -o $code -eq 0
+
+  starsim-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: examples/starsim
+        shell: cmd
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and unit-test with build.bat
+        run: build.bat test
+      - name: Headless screenshot through the Windows build
+        run: build\starsim.exe --scenario 4 --shot shot.ppm --frames 60 && if not exist shot.ppm exit /b 1

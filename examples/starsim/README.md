@@ -5,6 +5,13 @@ glowing stars and planets on fading orbit trails over a star field. Pan, zoom, f
 launch new ones with a predicted-path preview, warp time, and switch between 7 built-in
 scenarios — all in pure C with no third-party libraries.
 
+![starsim: Solar System, Galaxy, Galaxy Collision, Figure Eight, Planet Formation, Earth and Moon](docs/screenshots.png)
+
+*Real frames from the renderer (`--shot`), top-left to bottom-right: Solar System, Galaxy (3,000 stars,
+Barnes-Hut), Galaxy Collision, Figure Eight, Planet Formation (collisions on) and Earth and Moon.*
+
+**Quick start:** Windows `build.bat` then `build\starsim.exe`; Linux/macOS `make` then `./build/starsim`.
+
 ## Features
 
 - Real-time N-body gravity: direct summation or Barnes-Hut, toggle on the fly
