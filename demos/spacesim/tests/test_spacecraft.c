@@ -173,8 +173,11 @@ static void test_end_to_end_hohmann_transfer(void) {
     flight_plan_init(&p);
     /* First burn now, second burn one transfer time-of-flight later, both prograde
        in this planar circular setup. */
+    /* The transfer covers half an orbit (apoapsis is diametrically opposite
+       periapsis), so the prograde direction at arrival is -y when it was +y
+       at departure; both burns are prograde, i.e. along the local velocity. */
     flight_plan_add(&p, 0.0, ship_id, vec3_make(0, h.dv1, 0));
-    flight_plan_add(&p, h.tof, ship_id, vec3_make(0, h.dv2, 0));
+    flight_plan_add(&p, h.tof, ship_id, vec3_make(0, -h.dv2, 0));
 
     double dt = 5.0;
     double t_end = h.tof + 3600.0; /* run a bit past the arrival burn */

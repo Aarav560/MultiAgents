@@ -220,8 +220,10 @@ static void test_csv_empty_name(void) {
     CHECK(f != NULL);
 
     char line[512];
-    fgets(line, sizeof line, f); /* header */
-    fgets(line, sizeof line, f); /* data row with empty name */
+    char *ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* header */
+    ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* data row with empty name */
 
     /* Should have consecutive commas for empty name: ,0,,particle, */
     CHECK(strstr(line, ",0,,particle,") != NULL);
@@ -250,8 +252,10 @@ static void test_csv_special_doubles(void) {
     CHECK(f != NULL);
 
     char line[512];
-    fgets(line, sizeof line, f); /* header */
-    fgets(line, sizeof line, f); /* data row */
+    char *ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* header */
+    ret = fgets(line, sizeof line, f);
+    CHECK(ret != NULL); /* data row */
 
     /* Check that we have content and the kind is particle */
     CHECK(strstr(line, "particle") != NULL);
