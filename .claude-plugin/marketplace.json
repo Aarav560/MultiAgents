@@ -1,0 +1,16 @@
+{
+  "name": "multiagents",
+  "description": "hivemind: parallel multi-agent orchestration for Claude Code",
+  "owner": {
+    "name": "aarav560"
+  },
+  "plugins": [
+    {
+      "name": "hivemind",
+      "source": "./",
+      "description": "Parallel multi-agent orchestration for Claude Code: plan once, dispatch many subagents in waves with a per-task intelligence dial and near-flat token cost.",
+      "version": "1.0.0",
+      "category": "productivity"
+    }
+  ]
+}

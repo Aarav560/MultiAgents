@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/hive/scripts/hive.py\" status --line 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

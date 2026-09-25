@@ -1,0 +1,20 @@
+{
+  "name": "hivemind",
+  "version": "1.0.0",
+  "description": "Parallel multi-agent orchestration for Claude Code: plan once, dispatch many subagents in waves with a per-task intelligence dial and near-flat token cost.",
+  "author": {
+    "name": "aarav560",
+    "url": "https://github.com/aarav560"
+  },
+  "homepage": "https://github.com/aarav560/multiagents",
+  "repository": "https://github.com/aarav560/multiagents",
+  "license": "MIT",
+  "keywords": [
+    "multi-agent",
+    "parallel",
+    "orchestration",
+    "subagents",
+    "swarm",
+    "productivity"
+  ]
+}
