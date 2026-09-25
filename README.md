@@ -185,6 +185,40 @@ install, `hivemind:hive-<role>`) switches workers to the tool-restricted `hive-*
 format: [skills/hive/references/plan-format.md](skills/hive/references/plan-format.md). A realistic
 13-task, 44-file plan: [examples/saas-api](examples/saas-api/README.md).
 
+## Scaling to hundreds of tasks
+
+The kernel validates and dispatches a 3,000-task plan in about 0.1 s. These features keep large runs cheap and fast:
+
+| feature | what it does |
+|---|---|
+| `foreach: glob:src/*.c` / `range:1..50` / `a, b, c` | one plan entry expands to N tasks; `{item} {name} {stem} {dir} {slug} {i}` placeholders; deps on the template fan in to every copy |
+| `pack: N` | one worker runs up to N small tasks back to back, paying the ~15k overhead once; lanes are spread evenly over free slots so packing never costs parallelism |
+| `max_parallel: 20+` | wide waves; lanes beyond the limit start as slots free up |
+| compact dispatch | batches over 6 calls print the prompt template once plus one line per call |
+| project roots | a plan in `demo/.hive/` resolves every path against `demo/` |
+| critical-path first | long dependency chains start before short ones |
+
+## Case study: a space simulator in C, built by 27 agents
+
+[`demos/spacesim`](demos/spacesim) is `orbit`, an N-body simulator in C11 built by hive from one plan. It has
+direct and Barnes-Hut gravity, 5 integrators (up to 4th-order symplectic Yoshida), Keplerian orbital mechanics,
+Hohmann transfers, inelastic collisions, 7 scenarios (from the solar system to a 1,500-particle disk galaxy), CSV,
+terminal and PPM output, a CLI and INI configs.
+
+- **The plan:** the orchestrator wrote the core headers, `world.c`, the test harness and a complete API contract
+  ([`.hive/context.md`](demos/spacesim/.hive/context.md)), then a 26-task plan ([`.hive/plan.md`](demos/spacesim/.hive/plan.md)).
+  Modules are decoupled through an `accel_fn` function pointer, so 22 tasks ran in the first wave, on
+  20 concurrent workers (haiku, sonnet and opus picked per task).
+- **Mid-run steering:** the benchmark showed Barnes-Hut barely beating direct summation, so the orchestrator
+  appended an optimization task to the live plan and dispatched it alongside the integration work.
+- **Result:** about 7,500 lines of C across 67 files. 15 test suites (5,400+ checks) and a 24-check scenario sweep pass,
+  and everything compiles clean with `-Wall -Wextra -Wpedantic -Werror`. The figure-8 three-body orbit conserves energy to 1e-15
+  over a full period, and the Hohmann transfer lands 4.7 km from the 42,164 km GEO target.
+
+```
+cd demos/spacesim && make && make test && ./build/orbit --scenario solar --ascii
+```
+
 ## Token economics
 
 Every worker pays a fixed overhead of about 10-15k tokens (system prompt and tools), plus its
@@ -259,6 +293,7 @@ use the plugin marketplace, or copy `skills/hive`, `agents/hive-*.md` and `comma
 │   ├── scripts/hive.py        the kernel (stdlib Python)
 │   └── references/            planning, plan-format, modes, economics
 ├── examples/saas-api/         40-file example plan (context.md, plan.md, README.md)
+├── demos/spacesim/            orbit: C11 N-body simulator built by 27 hive agents (plan in .hive/)
 ├── tests/test_hive.py         kernel tests (python3 -m unittest discover -v tests)
 ├── install.sh                 standalone installer
 └── LICENSE
