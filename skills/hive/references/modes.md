@@ -48,7 +48,7 @@ verifier checks the result end to end.
 
 ```
         ┌── T2 builder ──┐
-T1 architect ──┤          ├── T5 integrator ── T6 verifier
+T1 architect ──┤          ├── T4 integrator ── T5 verifier
         └── T3 builder ──┘
 ```
 
@@ -74,21 +74,21 @@ deps: T1
 accept: npx vitest run src/checkout/payment src/checkout/order
 Implement charge() returning PaymentResult, and createOrder(cart, PaymentResult).
 
-## T5 [integrator deep] Wire checkout together
+## T4 [integrator deep] Wire checkout together
 writes: src/checkout/index.ts
 reads: src/checkout/cart.ts, src/checkout/payment.ts, src/checkout/order.ts
 deps: T2, T3
 Export checkout(cart) calling cart -> payment -> order, reconciling any mismatches.
 
-## T6 [verifier] End-to-end checkout test
+## T5 [verifier] End-to-end checkout test
 writes: tests/checkout.e2e.ts
 reads: src/checkout/index.ts
-deps: T5
+deps: T4
 accept: npx vitest run tests/checkout.e2e
 Exercise the full path including a declined payment.
 ```
 
-**Cost/speed:** 4 waves (T1 → T2/T3 in parallel → T5 → T6). Wall-clock is the sum of those
+**Cost/speed:** 4 waves (T1 → T2/T3 in parallel → T4 → T5). Wall-clock is the sum of those
 waves, not of all tasks — put as many independent builders as possible in the fan-out wave.
 Give the architect and integrator `deep`; builders can usually stay `standard`.
 
@@ -190,12 +190,11 @@ Call rank() from the search handler and return its output.
 `.hive/candidates/T1/r1/src/rank.ts` (and r2, r3 — candidate paths mirror the real ones under
 that prefix), plus a judge that keeps the id `T1`, reads `.hive/candidates/T1/` and the
 original `reads:`, and writes the real path `src/rank.ts`. Each `variants:` entry hints one
-candidate; with more candidates than variants they cycle. The judge's tier defaults to `deep`;
+candidate; extra candidates cycle through them. The judge's tier defaults to `deep`;
 `judge_tier:` overrides it.
 
 Downstream tasks just write `deps: T1` — they never see the replicas. `T2` cannot start until
-the judge (`T1`) is done, which itself waits on all three candidates, so `dispatch` naturally
-waits for the whole consensus round before unblocking T2.
+the judge (`T1`) is done, which itself waits on all three candidates.
 
 **Cost/speed:** an `xN` task costs N+1 workers instead of 1, and adds one full task's worth of
 wall-clock versus a single-candidate task (nothing downstream starts until the judge finishes).
@@ -246,71 +245,67 @@ one `xN` consensus task for the piece worth getting right, an integrator to wire
 a verifier at the end.
 
 ```
-T1 scout   T2 scout                     (recon)
-     └────┬────┘
-       T3 architect                     (contracts, from findings)
+T1 scout                                (recon)
+     │
+   T2 architect                         (contracts, from findings)
      ┌─────┼───────────┐
-   T4 builders(swarm) T5 builder x3     (fan-out + consensus)
+   T3 builders(swarm) T4 builder x3     (fan-out + consensus)
      └─────┴───────────┘
-              T6 integrator             (fan-in)
+              T5 integrator             (fan-in)
                    │
-              T7 verifier
+              T6 verifier
 ```
 
 ```markdown
 goal: Rebuild the recommendations engine
 budget: balanced
 
-## T1 [scout fast] Map current recommendations code
-writes: .hive/findings/reco-current.md
-reads: src/recommendations/
-List current files, entry points and the data sources they read.
+## T1 [scout fast] Map recommendations module and data sources
+writes: .hive/findings/reco.md
+reads: src/recommendations/, src/data/
+List current files and entry points, plus schemas and query patterns for the tables
+recommendations will read.
 
-## T2 [scout fast] Map recommendation data sources
-writes: .hive/findings/reco-data.md
-reads: src/data/
-List schemas and query patterns for the tables recommendations will read.
-
-## T3 [architect deep] Recommendations contracts
+## T2 [architect deep] Recommendations contracts
 writes: src/recommendations/types.ts
-reads: .hive/findings/reco-current.md, .hive/findings/reco-data.md
-deps: T1, T2
+reads: .hive/findings/reco.md
+deps: T1
 Define RecoInput, RecoOutput and the per-strategy signature builders code against.
 
-## T4 [builder fast] Popular-items and recently-viewed strategies
+## T3 [builder fast] Popular-items and recently-viewed strategies
 writes: src/recommendations/strategies/popular.ts, src/recommendations/strategies/recent.ts
 reads: src/recommendations/types.ts
-deps: T3
+deps: T2
 accept: npx vitest run recommendations/strategies
 Implement both strategies against the contract.
 
-## T5 [builder x3] Ranking/blend strategy
+## T4 [builder x3] Ranking/blend strategy
 writes: src/recommendations/strategies/blend.ts
 reads: src/recommendations/types.ts
-deps: T3
+deps: T2
 variants: weighted average | learned linear model | rule-based fallback chain
 accept: npx vitest run recommendations/strategies/blend
 Blend the other strategies' output into one ranked list.
 
-## T6 [integrator deep] Wire recommendation strategies
+## T5 [integrator deep] Wire recommendation strategies
 writes: src/recommendations/index.ts
 reads: src/recommendations/strategies/popular.ts, src/recommendations/strategies/recent.ts, src/recommendations/strategies/blend.ts
-deps: T4, T5
+deps: T3, T4
 Export recommend(user) that runs all strategies and returns blend's output.
 
-## T7 [verifier] End-to-end recommendations test
+## T6 [verifier] End-to-end recommendations test
 writes: tests/recommendations.e2e.ts
 reads: src/recommendations/index.ts
-deps: T6
+deps: T5
 accept: npx vitest run tests/recommendations.e2e
 Exercise recommend() for a new user (no history) and a returning user.
 ```
 
 **Cost/speed:** total cost is the sum of every task, including the `x3`'s extra 3 workers.
-Wall-clock is the critical path T1/T2 → T3 → (T4/T5, gated by T5's judge) → T6 → T7 — five
-waves deep even though 11 tasks exist, since `dispatch` batches whatever is ready in each wave
-rather than running tasks one at a time. Run `H estimate` before dispatching a plan with an
-`xN` or several waves, so the shape you drew is the shape you meant to pay for.
+Wall-clock is the critical path T1 → T2 → (T3/T4, gated by T4's judge) → T5 → T6 — five waves
+deep even though 9 tasks exist, since `dispatch` batches whatever is ready in each wave rather
+than running tasks one at a time. Run `H estimate` before dispatching a plan with an `xN` or
+several waves, so the shape you drew is the shape you meant to pay for.
 
 ## Streaming dispatch vs wave-by-wave dispatch
 
