@@ -51,6 +51,27 @@ After `init`, everything uses the project-local copy `python3 .hive/bin/hive.py`
 8. **Verify:** run `H verify --run`. Fix small failures yourself. For larger ones, add `verifier` or `builder` fix tasks and dispatch them.
 9. **Report** to the user in a few lines: what was built, what passed, and anything left open. Don't paste code.
 
+## Scaling to tens, hundreds, thousands of tasks
+
+The kernel validates and dispatches a 3,000-task plan in about 0.1 s. What limits scale is how
+many workers run at once and each worker's fixed overhead, so use these features:
+
+- **`foreach:` templates.** Write one entry and it expands to N tasks, so you never hand-write 100 entries.
+  `foreach: glob:src/**/*.c`, `foreach: range:1..40` or `foreach: auth, users, billing`.
+  The placeholders `{item} {name} {stem} {dir} {slug} {i}` are substituted into the id, the title, `writes`, `reads`, `accept` and the spec.
+  A task that `deps:` on the template id waits for **every** copy (fan-in).
+- **Packing (`pack: N`).** One worker runs up to N small tasks back to back, so it pays the roughly 15k overhead once.
+  Lanes only grow as big as needed to launch every ready task now, so parallelism is kept.
+  `architect`, `integrator` and `judge` tasks always run alone. Use `pack: 3` to `pack: 6` for swarms of small tasks.
+- **`max_parallel`.** Raise it for big swarms (20–50) if your environment allows that many concurrent subagents.
+  Lanes beyond the limit start as slots free up.
+- **Compact dispatch.** When there are more than 6 calls, dispatch prints the prompt template once plus one line per call.
+  Build each prompt by replacing `<IDS>` in the template with that lane's ids.
+- **Project roots.** A plan can live in a subdirectory (`demo/.hive/`), and all its paths are relative to `demo/`.
+  Workers are told this in their brief.
+- **Wide beats deep.** Keep the critical path short: one contracts wave, one wide build wave, then integrate.
+  Each extra dependency level adds a full worker round-trip to the wall-clock time.
+
 ## Token discipline (why cost stays flat)
 
 - A dispatch prompt is about 40 tokens. **Never** inline file contents, context or the plan into it.
@@ -89,6 +110,7 @@ goal: One-sentence goal
 budget: balanced          # lean | balanced | max
 max_parallel: 8           # optional; default comes from the budget (4 / 8 / 12)
 agents: general           # general | hive | plugin (see Worker types)
+pack: 1                   # optional; >1 lets one worker run up to N small tasks
 accept: npm test          # optional global check for verify --run (repeatable)
 
 ## T1 [architect] Shared contracts
@@ -106,10 +128,17 @@ Implement GET/POST /users against the contract in src/types.ts.
 writes: docs/
 deps: T1
 Document the public API.
+
+## TEST-{stem} [builder] Tests for {name}
+foreach: glob:src/api/*.ts
+writes: tests/{stem}.test.ts
+reads: {item}
+deps: T2
+Write tests for {item}.
 ```
 
 The header is `## <ID> [role tier|model xN] Title`, and everything inside `[...]` is optional.
-Key lines are `writes:`, `reads:`, `deps:` (comma separated), `accept:` (repeatable) and `variants:` (`|` separated).
+Key lines are `writes:`, `reads:`, `deps:` (comma separated), `accept:` (repeatable), `variants:` (`|` separated) and `foreach:`.
 A path ending in `/` owns the whole directory. Use `###` headings inside specs, never `##`.
 Roles: `architect`, `builder`, `scout`, `scribe`, `verifier`, `integrator` and `judge` (or a custom name).
 Full reference: [references/plan-format.md](references/plan-format.md).
@@ -122,6 +151,6 @@ switches to the `hive-<role>` subagents. Those restrict tools (scouts are read-o
 
 ## Kernel commands
 
-`init`, `validate`, `waves`, `estimate`, `dispatch [--dry --json --max N --requeue --stale MIN --retry-failed]`,
+`init`, `validate`, `waves`, `estimate [--pack N]`, `dispatch [--dry --json --max N --pack N --verbose --requeue --stale MIN --retry-failed]`,
 `status [--full]`, `board`, `verify [--run]`, `reset <ids>|--failed|--all`.
-Worker-side: `brief <id>`, `done <id> -m`, `fail <id> -m`, `ask <id> "<path>: change"`, `post <id> "decision"`.
+Worker-side: `brief <id>[,<id>...]`, `done <id> -m`, `fail <id> -m`, `ask <id> "<path>: change"`, `post <id> "decision"`.

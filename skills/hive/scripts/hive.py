@@ -45,6 +45,7 @@ def _find_hive_dir() -> Path:
 
 
 HIVE = _find_hive_dir()
+ROOT = HIVE.parent  # project root: every plan path is relative to it
 STATUS_DIR = HIVE / "status"
 REQ_DIR = HIVE / "requests"
 BOARD = HIVE / "board.md"
@@ -116,6 +117,15 @@ def die(msg: str, code: int = 1) -> None:
 
 def hive_cmd() -> str:
     return f"python3 {HIVE.as_posix()}/bin/hive.py"
+
+
+def at_root(p: str) -> Path:
+    return ROOT / p
+
+
+def root_prefix() -> str:
+    r = ROOT.as_posix()
+    return "" if r in ("", ".") else r
 
 
 def norm_path(p: str) -> str:
@@ -200,7 +210,7 @@ def parse_plan_md(text: str) -> dict:
             k, v = k.strip().lower(), v.strip()
             if k == "accept":
                 plan.setdefault("accept", []).append(v)
-            elif k in ("max_parallel", "agent_overhead_tokens"):
+            elif k in ("max_parallel", "agent_overhead_tokens", "pack"):
                 try:
                     plan[k] = int(v)
                 except ValueError:
@@ -208,7 +218,7 @@ def parse_plan_md(text: str) -> dict:
             elif k:
                 plan[k] = v
             continue
-        km = re.match(r"^(writes|reads|deps|accept|variants|judge_tier|model|tier|role):\s*(.*)$", line.strip()) if not in_fence else None
+        km = re.match(r"^(writes|reads|deps|accept|variants|judge_tier|model|tier|role|foreach):\s*(.*)$", line.strip()) if not in_fence else None
         if km and km.group(1) in ("model", "tier", "judge_tier", "role"):
             allowed = {"model": MODELS, "tier": TIERS, "judge_tier": TIERS, "role": tuple(ROLES)}[km.group(1)]
             if km.group(2).strip().lower() not in allowed:
@@ -222,6 +232,8 @@ def parse_plan_md(text: str) -> dict:
                     cur.setdefault("accept", []).append(v)
             elif k == "variants":
                 cur["variants"] = [x.strip() for x in v.split("|") if x.strip()]
+            elif k == "foreach":
+                cur["foreach"] = v
             else:
                 cur[k] = v.lower()
         else:
@@ -253,7 +265,7 @@ def normalize_task(t: dict) -> dict:
         t["model"] = str(t["model"]).lower()
     t["writes"] = [norm_path(p) for p in split_list(t.get("writes"))]
     t["reads"] = [norm_path(p) for p in split_list(t.get("reads"))]
-    t["deps"] = split_list(t.get("deps"))
+    t["deps"] = list(dict.fromkeys(split_list(t.get("deps"))))
     acc = t.get("accept") or []
     t["accept"] = [acc] if isinstance(acc, str) else list(acc)
     t["spec"] = str(t.get("spec") or "").strip()
@@ -263,6 +275,67 @@ def normalize_task(t: dict) -> dict:
     except (TypeError, ValueError):
         t["replicas"] = 1
     return t
+
+
+FOREACH_VARS = ("item", "name", "stem", "dir", "slug", "i")
+
+
+def foreach_items(spec) -> list:
+    if isinstance(spec, list):
+        return [str(x) for x in spec]
+    spec = str(spec).strip()
+    if spec.startswith("glob:"):
+        pat = spec[5:].strip()
+        return sorted(p.relative_to(ROOT).as_posix() for p in ROOT.glob(pat) if ".hive" not in p.parts)
+    m = re.fullmatch(r"range:\s*(-?\d+)\s*\.\.\s*(-?\d+)", spec)
+    if m:
+        lo, hi = int(m.group(1)), int(m.group(2))
+        return [str(n) for n in range(lo, hi + 1)]
+    return [x.strip() for x in spec.split(",") if x.strip()]
+
+
+def expand_foreach(tasks: list) -> list:
+    """A task with `foreach:` becomes one task per item. Placeholders {item} {name}
+    {stem} {dir} {slug} {i} are substituted everywhere (plain replace, so code
+    braces in specs are safe). Deps on the template id fan in to every copy."""
+    out, fan = [], {}
+    for t in tasks:
+        if not t.get("foreach"):
+            out.append(t)
+            continue
+        items = foreach_items(t["foreach"])
+        if not items:
+            die(f"{t['id']}: foreach matched no items ({t['foreach']})")
+        ids = []
+        for n, item in enumerate(items, 1):
+            base = item.rstrip("/").split("/")[-1]
+            stem = base.rsplit(".", 1)[0] if "." in base else base
+            v = {"item": item, "name": base, "stem": stem, "dir": item.rsplit("/", 1)[0] if "/" in item else ".",
+                 "slug": re.sub(r"[^A-Za-z0-9_.-]+", "-", stem).strip("-") or str(n), "i": str(n)}
+
+            def sub(x):
+                if isinstance(x, list):
+                    return [sub(y) for y in x]
+                if isinstance(x, str):
+                    for k in FOREACH_VARS:
+                        x = x.replace("{" + k + "}", v[k])
+                return x
+
+            c = {k: sub(val) for k, val in t.items() if k != "foreach"}
+            c["writes"] = [norm_path(w) for w in c["writes"]]
+            c["reads"] = [norm_path(r) for r in c["reads"]]
+            if c["id"] == t["id"]:
+                c["id"] = f"{t['id']}-{v['slug']}"
+            ids.append(c["id"])
+            out.append(c)
+        fan[t["id"]] = ids
+    if fan:
+        for t in out:
+            deps = []
+            for d in t["deps"]:
+                deps += fan.get(d, [d])
+            t["deps"] = list(dict.fromkeys(deps))
+    return out
 
 
 def expand_replicas(tasks: list) -> list:
@@ -276,7 +349,7 @@ def expand_replicas(tasks: list) -> list:
             continue
         variants = t.get("variants") or []
         rids = []
-        base = f"{HIVE.as_posix()}/candidates/{t['id']}"
+        base = f"{HIVE.name}/candidates/{t['id']}"
         for i in range(1, k + 1):
             rid = f"{t['id']}.r{i}"
             rids.append(rid)
@@ -331,13 +404,16 @@ class Plan:
         if isinstance(raw.get("models"), dict):
             self.models.update({k.lower(): str(v).lower() for k, v in raw["models"].items()})
         self.max_parallel = int(raw.get("max_parallel") or b["max_parallel"])
+        self.pack = int(raw.get("pack") or 1)
         self.agents = str(raw.get("agents", "general")).strip()
         acc = raw.get("accept") or []
         self.accept = [acc] if isinstance(acc, str) else list(acc)
         self.overhead = int(raw.get("agent_overhead_tokens") or 14000)
-        tasks = [normalize_task(t) for t in raw.get("tasks", [])]
+        tasks = expand_foreach([normalize_task(t) for t in raw.get("tasks", [])])
         self.tasks = expand_replicas(tasks) if expand else tasks
         self.by_id = {t["id"]: t for t in self.tasks}
+        self._levels = self._anc = self._cl = None
+        self._order: list = []
         self.children: dict = {t["id"]: [] for t in self.tasks}
         for t in self.tasks:
             for d in t["deps"]:
@@ -362,67 +438,64 @@ class Plan:
             return f"hivemind:hive-{t['role']}"
         return f"{style}{t['role']}"  # custom prefix
 
-    # ---- graph -------------------------------------------------------------
+    # ---- graph (iterative: safe for thousands of tasks) --------------------
     def topo_levels(self):
-        """Return (levels dict id->wave, cycle list or None)."""
+        """Return (levels dict id->wave, cycle list or None). Cached."""
+        if self._levels is not None:
+            return self._levels
         indeg = {t["id"]: 0 for t in self.tasks}
         for t in self.tasks:
             for d in t["deps"]:
                 if d in self.by_id:
                     indeg[t["id"]] += 1
         level = {}
+        order = []
         frontier = [i for i, n in indeg.items() if n == 0]
         for i in frontier:
             level[i] = 0
-        seen = 0
         while frontier:
             nxt = []
             for i in frontier:
-                seen += 1
+                order.append(i)
                 for c in self.children[i]:
                     level[c] = max(level.get(c, 0), level[i] + 1)
                     indeg[c] -= 1
                     if indeg[c] == 0:
                         nxt.append(c)
             frontier = nxt
-        if seen != len(self.tasks):
-            return level, sorted(i for i, n in indeg.items() if n > 0)
-        return level, None
+        self._order = order
+        cycle = sorted(i for i, n in indeg.items() if n > 0) if len(order) != len(self.tasks) else None
+        self._levels = (level, cycle)
+        return self._levels
 
     def ancestors(self) -> dict:
-        memo: dict = {}
-
-        def anc(i):
-            if i in memo:
-                return memo[i]
-            memo[i] = set()
-            s = set()
-            for d in self.by_id[i]["deps"]:
-                if d in self.by_id:
-                    s.add(d)
-                    s |= anc(d)
-            memo[i] = s
-            return s
-
-        for t in self.tasks:
-            anc(t["id"])
-        return memo
+        if self._anc is None:
+            self.topo_levels()
+            anc: dict = {}
+            for i in self._order:
+                s = set()
+                for d in self.by_id[i]["deps"]:
+                    if d in anc:
+                        s.add(d)
+                        s |= anc[d]
+                anc[i] = s
+            for t in self.tasks:  # tasks on a cycle (validate reports them)
+                anc.setdefault(t["id"], set())
+            self._anc = anc
+        return self._anc
 
     def critical_len(self) -> dict:
         """Weighted longest path from each task to a sink (critical-path priority)."""
-        memo: dict = {}
-
-        def cl(i):
-            if i in memo:
-                return memo[i]
-            memo[i] = 0
-            w = TIER_WEIGHT.get(self.by_id[i]["tier"], 2)
-            memo[i] = w + max((cl(c) for c in self.children[i]), default=0)
-            return memo[i]
-
-        for t in self.tasks:
-            cl(t["id"])
-        return memo
+        if self._cl is None:
+            self.topo_levels()
+            cl: dict = {}
+            for i in reversed(self._order):
+                w = TIER_WEIGHT.get(self.by_id[i]["tier"], 2)
+                cl[i] = w + max((cl.get(c, 0) for c in self.children[i]), default=0)
+            for t in self.tasks:
+                cl.setdefault(t["id"], 0)
+            self._cl = cl
+        return self._cl
 
 
 # --------------------------------------------------------------------------
@@ -571,18 +644,42 @@ def validate(plan: Plan, strict: bool = True):
         errors.append("dependency cycle among: " + ", ".join(cycle))
         return errors, warns
     anc = plan.ancestors()
-    owners: list = []
+    # Indexed conflict check: exact paths via a dict, directory specs via prefix
+    # scan, so thousands of owned paths validate in well under a second.
+    by_path: dict = {}
+    dirs: list = []
     for t in plan.tasks:
         for w in t["writes"]:
-            owners.append((w, t["id"]))
-    for i in range(len(owners)):
-        for j in range(i + 1, len(owners)):
-            (pa, ta), (pb, tb) = owners[i], owners[j]
-            if ta == tb or not paths_overlap(pa, pb):
-                continue
-            if ta in anc[tb] or tb in anc[ta]:
-                continue  # ordered: later task edits after earlier one finished
-            errors.append(f"write conflict: {ta} and {tb} both own {pa if len(pa) <= len(pb) else pb} and can run concurrently; add a dep or split ownership")
+            by_path.setdefault(w, []).append(t["id"])
+            if is_dir_spec(w):
+                dirs.append((w, t["id"]))
+    pairs = set()
+    for w, owners_ in by_path.items():
+        for x in range(len(owners_)):
+            for y in range(x + 1, len(owners_)):
+                pairs.add((owners_[x], owners_[y], w))
+    if dirs:
+        paths = sorted(by_path)
+        import bisect
+        for d, tid in dirs:
+            k = bisect.bisect_left(paths, d)
+            while k < len(paths) and paths[k].startswith(d):
+                for other in by_path[paths[k]]:
+                    if other != tid:
+                        pairs.add((tid, other, d))
+                k += 1
+    reported = set()
+    for ta, tb, w in sorted(pairs):
+        if ta == tb or ta in anc[tb] or tb in anc[ta]:
+            continue  # ordered: the later task edits after the earlier one finished
+        key = tuple(sorted((ta, tb)))
+        if key in reported:
+            continue
+        reported.add(key)
+        errors.append(f"write conflict: {ta} and {tb} both own {w} and can run concurrently; add a dep or split ownership")
+        if len(reported) >= 50:
+            errors.append("... more write conflicts omitted")
+            break
     if CONTEXT.exists():
         n = len(CONTEXT.read_text(encoding="utf-8"))
         if n > 12000:
@@ -627,12 +724,39 @@ def cmd_waves(a) -> None:
         print(f"wave {w}: " + "  ".join(cells))
 
 
-def worker_prompt(tid: str) -> str:
-    return (
-        f"HIVE WORKER {tid}. First run `{hive_cmd()} brief {tid}` and follow it exactly; "
-        f"it contains your role, context, task, owned files and finish protocol. "
-        f"Your final reply must be only the one line the brief asks for."
-    )
+PROMPT_TEMPLATE = (
+    "HIVE WORKER <IDS>. First run `{cmd} brief <IDS>` and follow it exactly; "
+    "it contains your role, context, task(s), owned files and finish protocol. "
+    "Your final reply must be only the one line the brief asks for."
+)
+NO_PACK_ROLES = ("architect", "integrator", "judge")
+
+
+def worker_prompt(ids) -> str:
+    ids = ids if isinstance(ids, str) else ",".join(ids)
+    return PROMPT_TEMPLATE.format(cmd=hive_cmd()).replace("<IDS>", ids)
+
+
+def make_lanes(plan: "Plan", ready: list, slots: int, pack: int) -> list:
+    """Group ready tasks into worker lanes. A lane is one Agent call that runs
+    several small tasks back to back, paying the per-worker overhead once.
+    Lanes only grow as large as needed to launch every ready task now."""
+    if slots <= 0 or not ready:
+        return []
+    solo = [t for t in ready if pack <= 1 or t["role"] in NO_PACK_ROLES]
+    packable = [t for t in ready if t not in solo]
+    lanes = [[t] for t in solo]
+    if packable:
+        free = max(1, slots - len(lanes))
+        size = min(pack, max(1, -(-len(packable) // free)))
+        groups: dict = {}
+        for t in packable:  # keep priority order inside each model group
+            groups.setdefault((plan.model_for(t), plan.subagent_for(t)), []).append(t)
+        for g in groups.values():
+            lanes += [g[i:i + size] for i in range(0, len(g), size)]
+    prio = plan.critical_len()
+    lanes.sort(key=lambda lane: -max(prio[t["id"]] for t in lane))
+    return lanes[:slots]
 
 
 def cmd_dispatch(a) -> None:
@@ -650,51 +774,67 @@ def cmd_dispatch(a) -> None:
             continue
         stale = a.stale is not None and now - float(st.get("started", now)) > a.stale * 60
         if a.requeue or stale:
-            states[tid] = write_state(tid, state="pending", note="requeued")
+            states[tid] = write_state(tid, state="pending", note="requeued", lane="")
             requeued.append(tid)
     if a.retry_failed:
         for tid, st in states.items():
             if st["state"] == "failed":
-                states[tid] = write_state(tid, state="pending", note="retry")
+                states[tid] = write_state(tid, state="pending", note="retry", lane="")
                 requeued.append(tid)
 
     def s(i):
         return states[i]["state"]
 
     running = [t["id"] for t in plan.tasks if s(t["id"]) == "running"]
+    busy_lanes = {states[i].get("lane") or i for i in running}
     done = [t["id"] for t in plan.tasks if s(t["id"]) == "done"]
     failed = [t["id"] for t in plan.tasks if s(t["id"]) == "failed"]
     anc = plan.ancestors()
-    blocked = [t["id"] for t in plan.tasks if s(t["id"]) == "pending" and any(s(x) == "failed" for x in anc[t["id"]])]
+    failed_set = set(failed)
+    blocked = [t["id"] for t in plan.tasks if s(t["id"]) == "pending" and anc[t["id"]] & failed_set]
     ready = [t for t in plan.tasks if s(t["id"]) == "pending" and all(s(d) == "done" for d in t["deps"])]
     cl = plan.critical_len()
     levels, _ = plan.topo_levels()
     ready.sort(key=lambda t: (-cl[t["id"]], levels[t["id"]]))
     limit = a.max if a.max else plan.max_parallel
-    slots = max(0, limit - len(running))
-    batch = ready[:slots]
+    slots = max(0, limit - len(busy_lanes))
+    pack = a.pack if a.pack else plan.pack
+    lanes = make_lanes(plan, ready, slots, pack)
+    launched = sum(len(x) for x in lanes)
+
+    def mark():
+        if a.dry:
+            return
+        for lane in lanes:
+            lane_id = ",".join(t["id"] for t in lane)
+            for t in lane:
+                write_state(t["id"], state="running", note="dispatched", lane=lane_id)
+
+    def call(lane):
+        ids = [t["id"] for t in lane]
+        t0 = lane[0]
+        title = t0["title"] if len(lane) == 1 else f"{len(lane)} tasks"
+        c = {"ids": ids, "description": f"hive {','.join(ids)} {title}"[:60], "subagent_type": plan.subagent_for(t0), "prompt": worker_prompt(ids)}
+        m = plan.model_for(t0)
+        if m != "inherit":
+            c["model"] = m
+        return c
 
     if a.json:
-        out = []
-        for t in batch:
-            m = plan.model_for(t)
-            call = {"id": t["id"], "description": f"hive {t['id']} {t['title']}"[:60], "subagent_type": plan.subagent_for(t), "prompt": worker_prompt(t["id"])}
-            if m != "inherit":
-                call["model"] = m
-            out.append(call)
-        if not a.dry:
-            for t in batch:
-                write_state(t["id"], state="running", note="dispatched")
+        out = [call(lane) for lane in lanes]
+        for c in out:
+            c["id"] = c["ids"][0]
+        mark()
         print(json.dumps({"launch": out, "running": running, "done": len(done), "total": len(plan.tasks), "failed": failed, "blocked": blocked}, indent=1))
         return
 
-    head = f"HIVE {len(done)}/{len(plan.tasks)} done, {len(running)} running"
+    head = f"HIVE {len(done)}/{len(plan.tasks)} done, {len(running)} running in {len(busy_lanes)} workers"
     if failed:
-        head += f", {len(failed)} failed ({', '.join(failed)})"
+        head += f", {len(failed)} failed ({', '.join(failed[:10])}{' ...' if len(failed) > 10 else ''})"
     if requeued:
-        head += f", requeued {', '.join(requeued)}"
+        head += f", requeued {', '.join(requeued[:10])}" + (f" (+{len(requeued) - 10} more)" if len(requeued) > 10 else "")
     print(head)
-    if not batch:
+    if not lanes:
         if len(done) == len(plan.tasks):
             print(f"ALL DONE. Next: `{hive_cmd()} verify --run`")
         elif running:
@@ -705,68 +845,120 @@ def cmd_dispatch(a) -> None:
         else:
             print("Nothing ready and nothing running; tasks may be stuck in `running`. Use `dispatch --requeue`.")
         return
-    more = len(ready) - len(batch)
-    print(f"LAUNCH {len(batch)} Agent calls in ONE message (parallel)" + (f"; {more} more ready after slots free" if more > 0 else "") + ":")
-    for n, t in enumerate(batch, 1):
-        m = plan.model_for(t)
-        model_s = "(omit: inherit)" if m == "inherit" else m
-        print(f"[{n}] description: hive {t['id']} {t['title'][:40]}")
-        print(f"    subagent_type: {plan.subagent_for(t)}   model: {model_s}")
-        print(f"    prompt: {worker_prompt(t['id'])}")
-    if not a.dry:
-        for t in batch:
-            write_state(t["id"], state="running", note="dispatched")
+    more = len(ready) - launched
+    tail = f"; {more} more ready after slots free" if more > 0 else ""
+    compact = len(lanes) > 6 and not a.verbose
+    if compact:
+        print(f"LAUNCH {len(lanes)} Agent calls ({launched} tasks) in ONE message (parallel){tail}.")
+        print("Every prompt is this template with <IDS> replaced by the lane's ids, verbatim:")
+        print(f"  {PROMPT_TEMPLATE.format(cmd=hive_cmd())}")
+        for n, lane in enumerate(lanes, 1):
+            c = call(lane)
+            print(f"[{n}] <IDS>={','.join(c['ids'])}  model: {c.get('model', '(omit: inherit)')}  "
+                  f"subagent_type: {c['subagent_type']}  description: {c['description']}")
+    else:
+        print(f"LAUNCH {len(lanes)} Agent calls ({launched} tasks) in ONE message (parallel){tail}:")
+        for n, lane in enumerate(lanes, 1):
+            c = call(lane)
+            print(f"[{n}] description: {c['description']}")
+            print(f"    subagent_type: {c['subagent_type']}   model: {c.get('model', '(omit: inherit)')}")
+            print(f"    prompt: {c['prompt']}")
+    mark()
+
+
+def _task_section(plan: "Plan", t: dict, multi: bool) -> list:
+    h = "###" if multi else "##"
+    out = []
+    if multi:
+        out += ["", f"## Task {t['id']}: {t['title']}", f"role: {t['role']} | tier: {t['tier']}"]
+    out += ["", f"{h} Your task" if not multi else f"{h} Spec", t["spec"]]
+    out += ["", f"{h} Files you own (exclusive write access)"]
+    out += [f"- {w}" for w in t["writes"]] or ["- (none: do not modify project files; report in your done note)"]
+    if t["reads"]:
+        out += ["", f"{h} Read these first"] + [f"- {r}" for r in t["reads"]]
+    ups = [plan.by_id[d] for d in t["deps"] if d in plan.by_id]
+    if ups:
+        out += ["", f"{h} Upstream results (already finished)"]
+        shown = ups[:25]
+        for u in shown:
+            us = read_state(u["id"])
+            files = ", ".join(u["writes"][:8]) + (" ..." if len(u["writes"]) > 8 else "")
+            out.append(f"- {u['id']} {u['title']}: {us.get('note', '')}" + (f" | files: {files}" if files else ""))
+        if len(ups) > len(shown):
+            out.append(f"- ... and {len(ups) - len(shown)} more upstream tasks (all done)")
+    if t["accept"]:
+        out += ["", f"{h} Acceptance (run these from the project root and make them pass before finishing)"]
+        out += [f"- `{c}`" for c in t["accept"]]
+    return out
 
 
 def cmd_brief(a) -> None:
     plan = Plan()
-    t = plan.by_id.get(a.id)
-    if not t:
-        die(f"unknown task {a.id}")
-    st = read_state(a.id)
-    if st["state"] == "done" and not a.peek:
-        print(f"{a.id} is already done ({st.get('note', '')}). Reply: `{a.id} already done`.")
+    ids = [x.strip() for x in a.id.split(",") if x.strip()]
+    for i in ids:
+        if i not in plan.by_id:
+            die(f"unknown task {i}")
+    todo, already = [], []
+    for i in ids:
+        st = read_state(i)
+        (already if st["state"] == "done" and not a.peek else todo).append(i)
+    if not todo:
+        print(f"{','.join(ids)} already done. Reply: `{','.join(ids)} already done`.")
         return
     if not a.peek:
-        write_state(a.id, state="running", note="working")
-    role_text = ROLES.get(t["role"], ("", f"Custom role: {t['role']}. Follow the spec."))[1]
-    out = [f"# HIVE BRIEF {t['id']}: {t['title']}", f"role: {t['role']} | tier: {t['tier']} | plan goal: {plan.goal or '-'}", "", "## Role", role_text]
+        for i in todo:
+            write_state(i, state="running", note="working")
+    tasks = [plan.by_id[i] for i in todo]
+    multi = len(tasks) > 1
+    t0 = tasks[0]
+    if multi:
+        out = [f"# HIVE BRIEF {','.join(todo)}: {len(tasks)} tasks. Do them in order; finish each one (run `done`) before starting the next.",
+               f"plan goal: {plan.goal or '-'}"]
+    else:
+        out = [f"# HIVE BRIEF {t0['id']}: {t0['title']}", f"role: {t0['role']} | tier: {t0['tier']} | plan goal: {plan.goal or '-'}"]
+    if already:
+        out.append(f"(already done, skip: {', '.join(already)})")
+    if root_prefix():
+        out.append(f"Project root: `{root_prefix()}/`. Every path in this brief is relative to it; run commands with `cd {root_prefix()} && ...`.")
+    roles = list(dict.fromkeys(t["role"] for t in tasks))
+    out += ["", "## Role" if len(roles) == 1 else "## Roles"]
+    for r in roles:
+        text = ROLES.get(r, ("", f"Custom role: {r}. Follow the spec."))[1]
+        out.append(text if len(roles) == 1 else f"- {r}: {text}")
     if CONTEXT.exists():
         ctx = re.sub(r"<!--.*?-->\n?", "", CONTEXT.read_text(encoding="utf-8"), flags=re.S).strip()
         out += ["", "## Project context (shared by all workers)", ctx]
-    out += ["", "## Your task", t["spec"]]
-    out += ["", "## Files you own (exclusive write access)"]
-    out += [f"- {w}" for w in t["writes"]] or ["- (none: do not modify project files; report in your done note)"]
-    if t["reads"]:
-        out += ["", "## Read these first"] + [f"- {r}" for r in t["reads"]]
-    ups = [plan.by_id[d] for d in t["deps"] if d in plan.by_id]
-    if ups:
-        out += ["", "## Upstream results (already finished)"]
-        for u in ups:
-            us = read_state(u["id"])
-            files = ", ".join(u["writes"][:8]) + (" ..." if len(u["writes"]) > 8 else "")
-            out.append(f"- {u['id']} {u['title']}: {us.get('note', '')}" + (f" | files: {files}" if files else ""))
+    for t in tasks:
+        out += _task_section(plan, t, multi)
     if BOARD.exists():
         lines = [x for x in BOARD.read_text(encoding="utf-8").splitlines() if x.strip()][-30:]
         if lines:
             out += ["", "## Team board (decisions other workers posted)"] + lines
-    if t["accept"]:
-        out += ["", "## Acceptance (run these and make them pass before finishing)"] + [f"- `{c}`" for c in t["accept"]]
     hc = hive_cmd()
+    me = t0["id"]
     out += [
         "",
         "## Rules",
         "- Only create or modify the files you own. Other workers are editing other files at the same time.",
-        f"- Need a change in a file you do not own? Record it and continue: `{hc} ask {t['id']} \"<path>: <change and why>\"`",
-        f"- Made a decision other workers must follow (a name, format or port)? Post it: `{hc} post {t['id']} \"<decision>\"`",
+        f"- Need a change in a file you do not own? Record it and continue: `{hc} ask {me} \"<path>: <change and why>\"`",
+        f"- Made a decision other workers must follow (a name, format or port)? Post it: `{hc} post {me} \"<decision>\"`",
         "- Do not run git commands that change state (commit, checkout, stash, reset, push); the orchestrator owns git.",
         "- Do not re-read files you have no reason to read. Do not explain your work in prose.",
         "",
         "## Finish",
-        f"1. Success: `{hc} done {t['id']} -m \"<=20 words: what exists now>\"`",
-        f"   Cannot finish: `{hc} fail {t['id']} -m \"<=20 words: why>\"`",
-        f"2. Your final reply must be exactly one line: `{t['id']} ok: <same note>` or `{t['id']} FAIL: <reason>`.",
     ]
+    if multi:
+        out += [
+            f"1. After EACH task: `{hc} done <id> -m \"<=20 words>\"` (or `{hc} fail <id> -m \"<why>\"`), then start the next.",
+            "   Finishing each task promptly lets downstream work start sooner.",
+            f"2. Your final reply must be exactly one line: `{','.join(todo)}: <id> ok|FAIL; ...` (for example `{todo[0]} ok; {todo[1]} ok`).",
+        ]
+    else:
+        out += [
+            f"1. Success: `{hc} done {me} -m \"<=20 words: what exists now>\"`",
+            f"   Cannot finish: `{hc} fail {me} -m \"<=20 words: why>\"`",
+            f"2. Your final reply must be exactly one line: `{me} ok: <same note>` or `{me} FAIL: <reason>`.",
+        ]
     print("\n".join(out))
 
 
@@ -775,7 +967,7 @@ def cmd_done(a) -> None:
     t = plan.by_id.get(a.id)
     if not t:
         die(f"unknown task {a.id}")
-    missing = [w for w in t["writes"] if not is_dir_spec(w) and not Path(w).exists()]
+    missing = [w for w in t["writes"] if not is_dir_spec(w) and not at_root(w).exists()]
     if missing and not a.force:
         die(f"{a.id}: owned files missing: {', '.join(missing)}. Create them, or use `fail`, or `done --force`.")
     write_state(a.id, state="done", note=(a.m or "").strip()[:300])
@@ -839,7 +1031,16 @@ def cmd_status(a) -> None:
     for t in plan.tasks:
         by_wave.setdefault(levels[t["id"]], []).append(t["id"])
     for w in sorted(by_wave):
-        print(f" w{w}: " + " ".join(f"{mark.get(states[i]['state'], '?')}{i}" for i in by_wave[w]))
+        ids = by_wave[w]
+        if len(ids) <= 24 or a.full:
+            print(f" w{w}: " + " ".join(f"{mark.get(states[i]['state'], '?')}{i}" for i in ids))
+        else:  # large waves: counts plus only the ids that need attention
+            c: dict = {}
+            for i in ids:
+                c[states[i]["state"]] = c.get(states[i]["state"], 0) + 1
+            hot = [f"{mark[states[i]['state']]}{i}" for i in ids if states[i]["state"] in ("running", "failed")][:20]
+            print(f" w{w}: {c.get('done', 0)}/{len(ids)} done, {c.get('running', 0)} running, {c.get('failed', 0)} failed"
+                  + (f" | {' '.join(hot)}" if hot else ""))
     if a.full:
         for t in plan.tasks:
             st = states[t["id"]]
@@ -865,7 +1066,7 @@ def cmd_verify(a) -> None:
             bad += 1
             continue
         for w in t["writes"]:
-            if not is_dir_spec(w) and not Path(w).exists():
+            if not is_dir_spec(w) and not at_root(w).exists():
                 print(f"MISSING {w} (owned by {t['id']})")
                 bad += 1
     if a.run:
@@ -883,7 +1084,7 @@ def cmd_verify(a) -> None:
                 cmds.append(("plan", c))
         for owner, c in cmds:
             try:
-                r = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=a.timeout)
+                r = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=a.timeout, cwd=str(ROOT))
                 ok, output = r.returncode == 0, (r.stdout + r.stderr)
             except subprocess.TimeoutExpired:
                 ok, output = False, f"timed out after {a.timeout}s"
@@ -919,7 +1120,7 @@ def cmd_reset(a) -> None:
 
 
 def _size_tokens(p: str) -> int:
-    path = Path(p)
+    path = at_root(p)
     try:
         if path.is_file():
             return path.stat().st_size // 4
@@ -931,6 +1132,10 @@ def _size_tokens(p: str) -> int:
 
 
 def cmd_estimate(a) -> None:
+    """Two numbers per task: unique tokens (what the worker actually has to read or
+    write once) and cumulative tokens (unique context re-read on every tool turn,
+    which is what usage meters count; most of it is billed as cheap cache reads).
+    Calibrated on real runs: a 1-3 file worker takes ~4-7 turns, 40-120k cumulative."""
     plan = Plan()
     ctx = len(CONTEXT.read_text(encoding="utf-8")) // 4 if CONTEXT.exists() else 0
     per_model: dict = {}
@@ -938,28 +1143,42 @@ def cmd_estimate(a) -> None:
     for t in plan.tasks:
         brief = ctx + (len(t["spec"]) + 1500) // 4
         reads = sum(_size_tokens(r) for r in t["reads"])
-        outp = sum(max(_size_tokens(w), 900) for w in t["writes"] if not is_dir_spec(w)) or 600
-        inp = plan.overhead + brief + reads + outp  # outputs get re-read once while editing
+        files = [w for w in t["writes"] if not is_dir_spec(w)]
+        outp = sum(max(_size_tokens(w), 900) for w in files) or 600
+        unique = plan.overhead + brief + reads + outp
+        turns = 2 + max(1, len(files))
+        cumulative = turns * (plan.overhead + brief) + (turns // 2) * (reads + outp)
         m = plan.model_for(t)
-        pm = per_model.setdefault(m, [0, 0, 0])
+        pm = per_model.setdefault(m, [0, 0, 0, 0])
         pm[0] += 1
-        pm[1] += inp
-        pm[2] += outp
-        rows.append((t["id"], m, inp, outp))
-    orch = len(plan.tasks) * 120 + 2000
-    tot_in = sum(r[2] for r in rows)
-    tot_out = sum(r[3] for r in rows)
+        pm[1] += unique
+        pm[2] += cumulative
+        pm[3] += outp
+        rows.append((t["id"], m, unique, cumulative, outp))
+    pack = max(1, a.pack or plan.pack)
+    packable = sum(1 for t in plan.tasks if t["role"] not in NO_PACK_ROLES)
+    workers = (len(plan.tasks) - packable) + -(-packable // pack)
+    extra = len(plan.tasks) - workers
+    saved_u = extra * plan.overhead
+    saved_c = extra * 3 * plan.overhead  # the fixed turns a separate worker would spend booting
+    orch = workers * 150 + 2000
     if a.full:
         for r in rows:
-            print(f"  {r[0]:<10} {r[1]:<8} in~{r[2]:>7,} out~{r[3]:>6,}")
-    for m, (n, i, o) in sorted(per_model.items()):
-        print(f"{m:<8} {n:>3} workers  in~{i:>9,}  out~{o:>8,}")
-    print(f"orchestrator overhead ~{orch:,} tokens ({len(plan.tasks)} dispatch lines + one-line reports)")
-    print(f"TOTAL ~{tot_in + orch:,} in / ~{tot_out:,} out (rough; set agent_overhead_tokens to tune)")
+            print(f"  {r[0]:<14} {r[1]:<8} unique~{r[2]:>8,} cumulative~{r[3]:>9,} out~{r[4]:>6,}")
+    for m, (n, u, c, o) in sorted(per_model.items()):
+        print(f"{m:<8} {n:>4} tasks  unique~{u:>10,}  cumulative~{c:>11,}  out~{o:>9,}")
+    tu = sum(r[2] for r in rows) - saved_u
+    tc = sum(r[3] for r in rows) - saved_c
+    to = sum(r[4] for r in rows)
+    print(f"orchestrator ~{orch:,} tokens ({workers} workers x ~150 for dispatch line + one-line report)")
+    if pack > 1:
+        print(f"packing {pack}: {len(plan.tasks)} tasks in ~{workers} workers, saves ~{saved_u:,} unique / ~{saved_c:,} cumulative")
+    print(f"TOTAL unique ~{tu + orch:,} | cumulative ~{tc + orch:,} (mostly prompt-cache reads) | output ~{to:,}")
     cl = plan.critical_len()
+    crit = max(cl.values()) if cl else 1
     total_w = sum(TIER_WEIGHT.get(t["tier"], 2) for t in plan.tasks)
-    print(f"wall-clock: critical path {max(cl.values()) if cl else 0} vs serial {total_w} weight units "
-          f"(~{total_w / max(max(cl.values()) if cl else 1, 1):.1f}x faster, capped by max_parallel {plan.max_parallel})")
+    print(f"wall-clock: critical path {crit} vs serial {total_w} weight units "
+          f"(~{total_w / max(crit, 1):.1f}x faster, capped by max_parallel {plan.max_parallel})")
 
 
 def cmd_board(a) -> None:
@@ -988,9 +1207,11 @@ def main(argv=None) -> None:
     s.add_argument("--requeue", action="store_true", help="requeue every task stuck in running")
     s.add_argument("--stale", type=float, default=None, metavar="MIN", help="requeue running tasks older than MIN minutes")
     s.add_argument("--retry-failed", action="store_true")
+    s.add_argument("--pack", type=int, default=0, metavar="N", help="let one worker run up to N small tasks (overrides plan `pack:`)")
+    s.add_argument("--verbose", action="store_true", help="full per-call output even for large batches")
     s.set_defaults(fn=cmd_dispatch)
 
-    s = sub.add_parser("brief", help="(worker) print a task's full assignment")
+    s = sub.add_parser("brief", help="(worker) print the assignment for one id or a comma list")
     s.add_argument("id")
     s.add_argument("--peek", action="store_true", help="show without changing state")
     s.set_defaults(fn=cmd_brief)
@@ -1033,6 +1254,7 @@ def main(argv=None) -> None:
 
     s = sub.add_parser("estimate", help="rough token and wall-clock estimate")
     s.add_argument("--full", action="store_true")
+    s.add_argument("--pack", type=int, default=0, metavar="N", help="estimate as if packing N tasks per worker")
     s.set_defaults(fn=cmd_estimate)
 
     args = p.parse_args(argv)

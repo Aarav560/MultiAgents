@@ -14,6 +14,7 @@ budget: <lean | balanced | max>
 agents: <general | hive | plugin | custom-prefix>
 max_parallel: <integer, default from budget>
 agent_overhead_tokens: <integer, default 14000>
+pack: <integer, default 1: tasks one worker may run back to back>
 accept: <shell command to verify overall success>
 ```
 
@@ -28,6 +29,7 @@ accept: <shell command to verify overall success>
   - `plugin` → `hivemind:hive-<role>`
   - `<custom-prefix>` → `<prefix><role>` (e.g., `custom-architect`)
 - **`max_parallel`**: cap on concurrently running tasks. Overrides budget default.
+- **`pack`**: when greater than 1, `dispatch` groups ready tasks that share a model and subagent type into lanes of up to `pack` tasks. Each lane is a single Agent call, and the worker receives a combined brief (`brief T1,T2,T3`) with the context shown once. A lane only grows as large as it must for every ready task to launch now. `architect`, `integrator` and `judge` tasks are never packed. `dispatch --pack N` overrides this for one call.
 - **`agent_overhead_tokens`**: per-task fixed overhead for tooling, briefs and communication. Tune this when estimating token usage.
 - **`accept`**: repeatable. Each is a shell command passed to `hive verify --run`. Runs after all tasks done.
 
@@ -159,6 +161,31 @@ Each task is assigned a model by:
 3. Else map `tier` to model via the budget table (or overrides in plan.md `models:` lines or JSON `models` object).
 
 `inherit` skips Claude model selection, letting the session's model handle the task.
+
+## Foreach Expansion
+
+A task with a `foreach:` key line becomes one task per item. Expansion happens before replica expansion.
+
+| form | items |
+|------|-------|
+| `foreach: glob:src/**/*.c` | matching paths relative to the project root, sorted (files under `.hive/` excluded) |
+| `foreach: range:1..20` | `1`, `2`, ... `20` (inclusive) |
+| `foreach: auth, users, billing` | the comma-separated values |
+
+The placeholders `{item}`, `{name}` (basename), `{stem}` (basename without extension), `{dir}`, `{slug}` (the stem made id-safe) and `{i}` (1-based index) are replaced with plain string substitution. This covers the id, title, spec, `writes`, `reads`, `deps` and `accept`. Other braces, such as C or JSON code in a spec, are left alone.
+If the id has no placeholder, each copy's id becomes `<id>-<slug>`. A `deps:` entry naming the template id expands to **all** of its copies (fan-in). A `foreach` that matches nothing is an error.
+
+```markdown
+## TEST-{stem} [builder fast] Tests for {name}
+foreach: glob:src/*.c
+writes: tests/test_{stem}.c
+reads: {item}, include/{stem}.h
+Write unit tests for {item}.
+```
+
+## Project Root
+
+Plan paths are relative to the directory that contains `.hive/`. When the plan lives in a subdirectory (`demo/.hive/`), workers dispatched from the repo root see `Project root: demo/` in their brief. `done` checks files and `verify --run` runs commands relative to that root.
 
 ## Replica Expansion
 

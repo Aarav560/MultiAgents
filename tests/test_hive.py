@@ -286,5 +286,105 @@ class TestDialAndAgents(HiveCase):
         self.assertIn("TOTAL", self.run_hive("estimate").stdout)
 
 
+class TestScale(HiveCase):
+    def test_foreach_glob_range_and_fan_in(self):
+        self.touch("src/alpha.c", "src/beta.c", "src/gamma.c")
+        self.plan("""\
+            ## T-{stem} [builder]
+            foreach: glob:src/*.c
+            writes: tests/test_{stem}.c
+            reads: {item}
+            Test {name}; braces in code are safe: int f(void) { return 0; }
+            ## P [scribe]
+            foreach: range:1..4
+            writes: docs/page{i}.md
+            Page {i}.
+            ## FIN [integrator]
+            writes: Makefile
+            deps: T-{stem}, P
+            wire
+            """)
+        self.assertIn("OK 8 tasks", self.run_hive("validate").stdout)
+        brief = self.run_hive("brief", "T-beta", "--peek").stdout
+        self.assertIn("- tests/test_beta.c", brief)
+        self.assertIn("- src/beta.c", brief)
+        self.assertIn("int f(void) { return 0; }", brief)
+        self.assertIn("- docs/page3.md", self.run_hive("brief", "P-3", "--peek").stdout)
+        waves = self.run_hive("waves").stdout
+        self.assertIn("wave 1: .FIN", waves)  # FIN waits for all 7 expansions
+
+    def test_packing_lanes_multi_brief(self):
+        self.plan("""\
+            max_parallel: 3
+            pack: 4
+            ## W [builder]
+            foreach: range:1..10
+            writes: out/w{i}.txt
+            Write {i}.
+            ## A [architect]
+            writes: arch.md
+            design
+            """)
+        data = json.loads(self.run_hive("dispatch", "--json").stdout)
+        lanes = [c["ids"] for c in data["launch"]]
+        self.assertEqual(len(lanes), 3)
+        self.assertIn(["A"], lanes)  # architects never packed
+        self.assertEqual(sum(len(x) for x in lanes), 1 + 8)  # 2 free slots x lane size 4
+        packed = next(x for x in lanes if len(x) > 1)
+        brief = self.run_hive("brief", ",".join(packed)).stdout
+        self.assertIn(f"{len(packed)} tasks. Do them in order", brief)
+        self.assertIn(f"## Task {packed[1]}", brief)
+        self.assertEqual(brief.count("## Project context"), 1)  # shared once
+        # 3 lanes busy -> no free slots even though tasks are ready
+        self.assertIn("Nothing new is ready", self.run_hive("dispatch").stdout)
+        for i in packed:
+            n = i.split("-")[1]
+            self.touch(f"out/w{n}.txt")
+            self.run_hive("done", i, "-m", "ok")
+        out = self.run_hive("dispatch").stdout
+        self.assertIn("LAUNCH 1 Agent calls", out)
+
+    def test_compact_dispatch_for_big_batches(self):
+        self.plan("""\
+            max_parallel: 20
+            ## W [scribe]
+            foreach: range:1..12
+            writes: out/{i}.txt
+            Write {i}.
+            """)
+        out = self.run_hive("dispatch").stdout
+        self.assertIn("LAUNCH 12 Agent calls (12 tasks)", out)
+        self.assertIn("<IDS>=W-7", out)
+        self.assertEqual(out.count("First run"), 1)  # template printed once
+
+    def test_project_subdirectory_root(self):
+        sub = self.dir / "demo"
+        sub.mkdir()
+        env = {k: v for k, v in os.environ.items() if k != "HIVE_DIR"}
+        subprocess.run([sys.executable, str(HIVE), "init"], cwd=sub, check=True, capture_output=True, env=env)
+        (sub / ".hive" / "plan.md").write_text("accept: test -f a.txt\n## A\nwrites: a.txt\na\n")
+        local = ["python3", "demo/.hive/bin/hive.py"]
+        r = subprocess.run(local + ["brief", "A"], cwd=self.dir, capture_output=True, text=True, env=env)
+        self.assertIn("Project root: `demo/`", r.stdout)
+        self.assertIn("python3 demo/.hive/bin/hive.py done A", r.stdout)
+        (sub / "a.txt").write_text("x")
+        r = subprocess.run(local + ["done", "A"], cwd=self.dir, capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = subprocess.run(local + ["verify", "--run"], cwd=self.dir, capture_output=True, text=True, env=env)
+        self.assertIn("VERIFY OK", r.stdout)
+
+    def test_thousand_task_plan_is_fast(self):
+        lines = ["max_parallel: 50", "pack: 5", "## ROOT [architect]", "writes: contracts/", "root", ""]
+        for i in range(1000):
+            lines += [f"## M{i} [builder fast]", f"writes: mod/m{i}.c, mod/m{i}.h", "deps: ROOT" if i % 10 == 0 else f"deps: M{i - 1}", f"module {i}", ""]
+        self.plan("\n".join(lines))
+        import time as _t
+        t0 = _t.time()
+        self.assertIn("OK 1001 tasks", self.run_hive("validate").stdout)
+        self.run_hive("dispatch")
+        self.run_hive("status")
+        self.assertLess(_t.time() - t0, 10)
+
+
 if __name__ == "__main__":
     unittest.main()
