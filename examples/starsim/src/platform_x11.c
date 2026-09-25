@@ -249,21 +249,17 @@ int pf_poll(pf_input *in) {
 }
 
 void pf_present(const uint32_t *px, int w, int h) {
-    if (!g_dpy || !g_img) return;
-    if (w < 1 || h < 1) return;
+    if (!g_dpy || w < 1 || h < 1) return;
 
-    if (w != g_img_w || h != g_img_h) {
-        if (w == g_win_w && h == g_win_h) {
-            /* framebuffer already matches window size: swap the backing buffer directly */
-            if (pf_alloc_image(w, h) != 0) return;
-        }
+    /* keep the XImage backing buffer sized to the current client area */
+    if (!g_img || g_img_w != g_win_w || g_img_h != g_win_h) {
+        if (pf_alloc_image(g_win_w, g_win_h) != 0) return;
     }
 
     if (w == g_img_w && h == g_img_h) {
         memcpy(g_img_buf, px, (size_t)w * (size_t)h * sizeof(uint32_t));
     } else {
         /* nearest-neighbour stretch from the w x h framebuffer into the g_img_w x g_img_h buffer */
-        if (pf_alloc_image(g_win_w, g_win_h) != 0) return;
         for (int y = 0; y < g_img_h; y++) {
             int sy = (int)((int64_t)y * h / g_img_h);
             if (sy >= h) sy = h - 1;
